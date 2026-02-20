@@ -153,7 +153,7 @@ async function main() {
     console.log("[2/4] " + L.checkGeminiDep);
     const depRes = runCommand("npm install", SCRIPT_DIR);
     if (depRes.status !== 0) {
-        console.error("Error: npm install failed for gemini-backend.");
+        console.error("Error: npm install failed for gemini-cli-claw.");
         process.exit(1);
     }
     console.log(L.installDepSuccess + "\n");
@@ -211,7 +211,7 @@ async function main() {
         if (authAns.trim() === '' || authAns.trim().toLowerCase() === 'y') {
             console.log(L.authStart);
             
-            // Prefer the locally installed gemini CLI in gemini-backend, fallback to npx
+            // Prefer the locally installed gemini CLI in gemini-cli-claw, fallback to npx
             const localGeminiPath = path.join(SCRIPT_DIR, "node_modules", ".bin", "gemini");
             const commandToRun = fs.existsSync(localGeminiPath) ? localGeminiPath : "npx gemini";
             
