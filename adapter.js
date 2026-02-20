@@ -34,6 +34,13 @@ try {
     returnError('Failed to read stdin', e);
 }
 
+// === TEMP DEBUG: stdinの内容確認 ===
+const _dbgPath = path.join(__dirname, 'adapter-debug.log');
+try {
+    fs.appendFileSync(_dbgPath, `[${new Date().toISOString()}] stdin(${stdin.length}):\n${stdin.substring(0, 600)}\n---\n`);
+} catch(_) {}
+// === END TEMP DEBUG ===
+
 // ---------------------------------------------------------------------------
 // 2. Parse OpenClaw payload
 //    OpenClaw wraps its system prompt in <system>...</system>
@@ -49,6 +56,36 @@ if (systemMatch) {
     systemBlock = systemMatch[1];
     userMessage = stdin.replace(systemMatch[0], '').trim();
 }
+
+// Extract image paths from user message: [media attached: path] or [Image: source: path]
+const mediaPaths = [];
+const imageExts = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif)$/i;
+
+// Match [media attached N/M: path (type) | url] or [media attached: path]
+const mediaAttachedPattern = /\[media attached(?:\s+\d+\/\d+)?:\s*([^\]]+)\]/gi;
+let match;
+while ((match = mediaAttachedPattern.exec(userMessage)) !== null) {
+    const content = match[1];
+    if (/^\d+\s+files?$/i.test(content.trim())) continue;
+    
+    const pathMatch = content.match(/^\s*(.+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif))\s*(?:\(|$|\|)/i);
+    if (pathMatch && pathMatch[1]) {
+        mediaPaths.push(pathMatch[1].trim());
+    }
+}
+
+// Match [Image: source: /path/...]
+const messageImagePattern = /\[Image:\s*source:\s*([^\]]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif))\]/gi;
+while ((match = messageImagePattern.exec(userMessage)) !== null) {
+    if (match[1]) {
+        mediaPaths.push(match[1].trim());
+    }
+}
+
+// Optionally, remove the text references to avoid confusing the CLI or keeping them as text,
+// but for now we leave them as Gemini might use them for context, 
+// or we can remove them if they cause issues. We'll remove them to be clean.
+userMessage = userMessage.replace(mediaAttachedPattern, '').replace(messageImagePattern, '').trim();
 
 const workspaceMatch = systemBlock.match(/Your working directory is: (.*)/);
 const workspace = workspaceMatch ? workspaceMatch[1].trim() : process.cwd();
@@ -224,6 +261,10 @@ const baseGeminiArgs = [
     '-o', 'json',
     '--allowed-mcp-server-names', 'openclaw-tools',
 ];
+
+for (const mediaPath of mediaPaths) {
+    baseGeminiArgs.push(`@${mediaPath}`);
+}
 
 const geminiArgs = geminiSessionId
     ? ['--resume', geminiSessionId, ...baseGeminiArgs]
