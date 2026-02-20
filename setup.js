@@ -1,119 +1,211 @@
 #!/usr/bin/env node
 /**
- * setup.js — OpenClaw Gemini Backend Installer
+ * setup.js — OpenClaw Gemini Backend Interactive Installer
  *
- * Cross-platform (Linux / macOS / Windows) setup script.
- * Requires Node.js (which is already required by OpenClaw itself).
- *
- * Usage:
- *   node setup.js
- *
- * What it does:
- *   1. Installs npm dependencies in this directory
- *   2. Registers the `gemini-adapter` cliBackend in ~/.openclaw/openclaw.json
- *      using the ABSOLUTE path to adapter.js, derived from this script's location.
- *      This path calculation is fully portable regardless of where the repo is cloned.
+ * 対話型のインストーラーです。言語選択、OpenClaw本体の状態確認と自動ビルド、
+ * 依存関係のインストール、そしてGemini APIの認証確認までを一貫して行います。
  */
 
 "use strict";
 
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const readline = require("readline");
 
-// ---------- [0] Path resolution ----------
-// __dirname is always the directory containing THIS script,
-// regardless of the CWD from which it was invoked.
 const SCRIPT_DIR = __dirname;
+const OPENCLAW_ROOT = path.resolve(SCRIPT_DIR, "..");
 const ADAPTER_JS = path.join(SCRIPT_DIR, "adapter.js");
 const OPENCLAW_CONFIG = path.join(os.homedir(), ".openclaw", "openclaw.json");
+const GEMINI_CREDS_DIR = path.join(os.homedir(), ".gemini");
 
-console.log("=================================================");
-console.log("  OpenClaw Gemini Backend Setup");
-console.log("=================================================");
-console.log(`  Backend directory : ${SCRIPT_DIR}`);
-console.log(`  adapter.js path   : ${ADAPTER_JS}`);
-console.log(`  openclaw.json     : ${OPENCLAW_CONFIG}`);
-console.log("");
-
-// ---------- [1] Check prerequisites ----------
-if (!fs.existsSync(OPENCLAW_CONFIG)) {
-    console.error(`ERROR: ${OPENCLAW_CONFIG} not found.`);
-    console.error("Please run OpenClaw at least once to generate it, then re-run setup.js.");
-    process.exit(1);
-}
-
-// ---------- [2] Install npm dependencies ----------
-console.log("[1/2] Installing npm dependencies...");
-try {
-    execSync("npm install", {
-        cwd: SCRIPT_DIR,
-        stdio: "inherit", // show npm output directly
-    });
-    console.log("  ✓ npm install complete\n");
-} catch (e) {
-    console.error("ERROR: npm install failed.", e.message);
-    process.exit(1);
-}
-
-// ---------- [3] Register gemini-adapter in openclaw.json ----------
-console.log("[2/2] Registering gemini-adapter in openclaw.json...");
-
-let config;
-try {
-    const raw = fs.readFileSync(OPENCLAW_CONFIG, "utf-8");
-    config = JSON.parse(raw);
-} catch (e) {
-    console.error(`ERROR: Failed to parse ${OPENCLAW_CONFIG}: ${e.message}`);
-    process.exit(1);
-}
-
-// Deep-merge: only update the specific nested key, preserve everything else
-if (!config.agents) config.agents = {};
-if (!config.agents.defaults) config.agents.defaults = {};
-if (!config.agents.defaults.cliBackends) config.agents.defaults.cliBackends = {};
-
-config.agents.defaults.cliBackends["gemini-adapter"] = {
-    command: "node",
-    input: "stdin",
-    output: "text", // 必須: adapter.js が既にテキスト化しているため再パースさせない
-    systemPromptArg: "--system",
-    args: [
-        // PORTABLE: absolute path computed from this script's location at install time.
-        // Works on Linux, macOS, and Windows (Node normalizes path separators).
-        ADAPTER_JS,
-        "--session-id", "{sessionId}",
-        "--allowed-skills", "{allowedSkillsPaths}",
-    ],
-    resumeArgs: [
-        ADAPTER_JS,
-        "--session-id", "{sessionId}",
-        "--allowed-skills", "{allowedSkillsPaths}",
-    ],
+// Messages vocabulary
+const MSG = {
+    ja: {
+        welcome: "OpenClaw Gemini Backend セットアップへようこそ！",
+        checkOpenclaw: "OpenClaw 本体のインストール状態をチェックしています...",
+        installOpenclaw: "OpenClaw がビルドされていないようです。ビルドを実行しますか？ (Y/n): ",
+        buildingOpenclaw: "OpenClaw をビルド中 (npm install && npm run build)...",
+        buildOpenclawSuccess: "✓ OpenClaw のビルド完了",
+        checkGeminiDep: "Gemini Backend (このフォルダ) の npm パッケージをインストール中...",
+        installDepSuccess: "✓ npm 依存関係のインストール完了",
+        registerAdapter: "openclaw.json に gemini-adapter を登録しています...",
+        registerAdapterSuccess: "✓ gemini-adapter の登録完了",
+        checkAuth: "Gemini CLI の認証状況をチェックしています...",
+        authNeeded: "Gemini API の認証が見つかりません。今すぐログインしますか？ (Y/n): ",
+        authStart: "認証を開始します。ターミナルに表示される指示に従ってログインしてください...",
+        authSuccess: "✓ Gemini 認証完了",
+        finish: "セットアップがすべて完了しました！",
+        tryIt: "試してみる: node ../scripts/run-node.mjs agent -m 'こんにちは' --local"
+    },
+    en: {
+        welcome: "Welcome to OpenClaw Gemini Backend Setup!",
+        checkOpenclaw: "Checking OpenClaw base installation...",
+        installOpenclaw: "OpenClaw does not appear to be built. Build it now? (Y/n): ",
+        buildingOpenclaw: "Building OpenClaw (npm install && npm run build)...",
+        buildOpenclawSuccess: "✓ OpenClaw build complete",
+        checkGeminiDep: "Installing npm dependencies for Gemini Backend...",
+        installDepSuccess: "✓ npm dependencies installed",
+        registerAdapter: "Registering gemini-adapter in openclaw.json...",
+        registerAdapterSuccess: "✓ gemini-adapter registered",
+        checkAuth: "Checking Gemini CLI authentication...",
+        authNeeded: "Gemini API authentication not found. Login now? (Y/n): ",
+        authStart: "Starting authentication. Please follow the instructions to login...",
+        authSuccess: "✓ Gemini authentication complete",
+        finish: "Setup is fully complete!",
+        tryIt: "Try it out: node ../scripts/run-node.mjs agent -m 'hello' --local"
+    }
 };
 
-try {
-    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2), "utf-8");
-    console.log("  ✓ gemini-adapter registered successfully\n");
-} catch (e) {
-    console.error(`ERROR: Failed to write ${OPENCLAW_CONFIG}: ${e.message}`);
-    process.exit(1);
+let L = MSG.en; // Default language fallback
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
+
+const question = (query) => new Promise((resolve) => rl.question(query, resolve));
+
+function runCommand(command, cwd) {
+    return spawnSync(command, { cwd, shell: true, stdio: "inherit" });
 }
 
-// ---------- [4] Done ----------
-console.log("=================================================");
-console.log("  Setup complete!");
-console.log("");
-console.log("  To use Gemini CLI as your OpenClaw backend,");
-console.log("  add the following to ~/.openclaw/openclaw.json:");
-console.log("");
-console.log('  "agents": {');
-console.log('    "defaults": {');
-console.log('      "provider": "gemini-adapter"');
-console.log("    }");
-console.log("  }");
-console.log("");
-console.log("  Or test immediately:");
-console.log("    node scripts/run-node.mjs agent -m 'hello' --local");
-console.log("=================================================");
+async function main() {
+    console.log("=================================================");
+    
+    // 0. Language selection
+    const lang = await question("Select language / 言語を選択してください [1] English [2] 日本語 (1/2): ");
+    if (lang.trim() === '2') {
+        L = MSG.ja;
+    }
+    
+    console.log("\n" + L.welcome);
+    console.log("=================================================\n");
+
+    // 1. Check OpenClaw
+    console.log("[1/4] " + L.checkOpenclaw);
+    let openclawNeedsBuild = false;
+    
+    // build target validation (dist/index.js shouldn't be missing if properly built)
+    if (!fs.existsSync(path.join(OPENCLAW_ROOT, "dist", "index.js"))) {
+        openclawNeedsBuild = true;
+    }
+
+    if (openclawNeedsBuild) {
+        const buildAns = await question(L.installOpenclaw);
+        if (buildAns.trim() === '' || buildAns.trim().toLowerCase() === 'y') {
+            console.log(L.buildingOpenclaw);
+            const res = runCommand("npm install && npm run build", OPENCLAW_ROOT);
+            if (res.status !== 0) {
+                console.error("Error: OpenClaw build failed. Setup cannot continue.");
+                process.exit(1);
+            }
+            console.log(L.buildOpenclawSuccess + "\n");
+        }
+    } else {
+        console.log(L.buildOpenclawSuccess + " (Skipped / 読込済)\n");
+    }
+
+    // 2. Install Gemini Backend dependencies
+    console.log("[2/4] " + L.checkGeminiDep);
+    const depRes = runCommand("npm install", SCRIPT_DIR);
+    if (depRes.status !== 0) {
+        console.error("Error: npm install failed for gemini-backend.");
+        process.exit(1);
+    }
+    console.log(L.installDepSuccess + "\n");
+
+    // 3. Register adapter in openclaw.json
+    console.log("[3/4] " + L.registerAdapter);
+    
+    let config = {};
+    if (fs.existsSync(OPENCLAW_CONFIG)) {
+        try {
+            config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, "utf-8"));
+        } catch (e) {
+            console.warn("Warning: Failed to parse openclaw.json, creating a new structure.");
+        }
+    } else {
+        fs.mkdirSync(path.dirname(OPENCLAW_CONFIG), { recursive: true });
+    }
+
+    if (!config.agents) config.agents = {};
+    if (!config.agents.defaults) config.agents.defaults = {};
+    if (!config.agents.defaults.cliBackends) config.agents.defaults.cliBackends = {};
+
+    // Dynamic path handling: Portable, robust absolute path calculation
+    config.agents.defaults.cliBackends["gemini-adapter"] = {
+        command: "node",
+        input: "stdin",
+        output: "text", // essential: ensures OpenClaw parses text out correctly
+        systemPromptArg: "--system",
+        args: [
+            ADAPTER_JS,
+            "--session-id", "{sessionId}",
+            "--allowed-skills", "{allowedSkillsPaths}"
+        ],
+        resumeArgs: [
+            ADAPTER_JS,
+            "--session-id", "{sessionId}",
+            "--allowed-skills", "{allowedSkillsPaths}"
+        ]
+    };
+
+    try {
+        fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2), "utf-8");
+        console.log(L.registerAdapterSuccess + "\n");
+    } catch (e) {
+        console.error("Error writing openclaw.json:", e);
+    }
+
+    // 4. Gemini CLI Authentication
+    console.log("[4/4] " + L.checkAuth);
+    const credsPath1 = path.join(GEMINI_CREDS_DIR, "oauth_creds.json");
+    const credsPath2 = path.join(GEMINI_CREDS_DIR, "google_accounts.json");
+    
+    if (!fs.existsSync(credsPath1) && !fs.existsSync(credsPath2)) {
+        const authAns = await question(L.authNeeded);
+        if (authAns.trim() === '' || authAns.trim().toLowerCase() === 'y') {
+            console.log(L.authStart);
+            
+            // Prefer the locally installed gemini CLI in gemini-backend, fallback to npx
+            const localGeminiPath = path.join(SCRIPT_DIR, "node_modules", ".bin", "gemini");
+            const commandToRun = fs.existsSync(localGeminiPath) ? localGeminiPath : "npx gemini";
+            
+            // Use --no-browser to avoid terminal hanging issues in headless/SSH setups
+            runCommand(commandToRun + " login --no-browser", SCRIPT_DIR);
+            
+            if (fs.existsSync(credsPath1) || fs.existsSync(credsPath2)) {
+                console.log(L.authSuccess + "\n");
+            } else {
+                console.log("Info: Authentication credentials still not found. You may need to manually run `npx @google/gemini-cli login` later.\n");
+            }
+        }
+    } else {
+        console.log(L.authSuccess + " (Already authenticated / 認証済)\n");
+    }
+
+    console.log("=================================================");
+    console.log(L.finish);
+    
+    // Write out how to use it
+    console.log("");
+    console.log("If you haven't already, add this to ~/.openclaw/openclaw.json:");
+    console.log('  "agents": {');
+    console.log('    "defaults": {');
+    console.log('      "provider": "gemini-adapter"');
+    console.log('    }');
+    console.log('  }');
+    console.log("");
+    console.log(L.tryIt);
+    console.log("=================================================");
+
+    rl.close();
+}
+
+main().catch((err) => {
+    console.error("Fatal error during setup:", err);
+    rl.close();
+    process.exit(1);
+});
