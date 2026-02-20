@@ -1,0 +1,21 @@
+node_modules/
+npm-debug.log*
+.npm
+
+# デバッグログ
+adapter-debug.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 一時ファイル
+*.tmp
+*.temp
+
+# 環境変数
+.env
+.env.local
+
+# ビルド成果物
+dist/
