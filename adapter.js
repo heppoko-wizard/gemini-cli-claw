@@ -1,23 +1,44 @@
 #!/usr/bin/env node
 
-// MCP Integration imports will go here
+'use strict';
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const crypto = require('crypto');
 
-// Read all of stdin
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Return an error message to OpenClaw via stdout and exit.
+ * This guarantees OpenClaw always gets a response, never a silent hang.
+ */
+function returnError(msg, err) {
+    const detail = err instanceof Error ? err.message : (err ? String(err) : '');
+    const text = detail ? `⚠️ Gemini Backend Error: ${msg}: ${detail}` : `⚠️ Gemini Backend Error: ${msg}`;
+    try { process.stdout.write(text); } catch (_) {}
+    process.exit(0); // exit 0 so OpenClaw treats the text output as a response
+}
+
+// ---------------------------------------------------------------------------
+// 1. Read stdin
+// ---------------------------------------------------------------------------
+
 let stdin = '';
 try {
     stdin = fs.readFileSync(0, 'utf-8');
 } catch (e) {
-    console.error("Failed to read stdin:", e);
-    process.exit(1);
+    returnError('Failed to read stdin', e);
 }
 
-// Parse the OpenClaw payload
-// OpenClaw wraps its system prompt in <system>...</system>
+// ---------------------------------------------------------------------------
+// 2. Parse OpenClaw payload
+//    OpenClaw wraps its system prompt in <system>...</system>
+// ---------------------------------------------------------------------------
+
 const systemRegex = /<system>\n([\s\S]*?)\n<\/system>/;
 const systemMatch = stdin.match(systemRegex);
 
@@ -26,218 +47,288 @@ let userMessage = stdin;
 
 if (systemMatch) {
     systemBlock = systemMatch[1];
-    // Remove the <system> block to leave only the user message
     userMessage = stdin.replace(systemMatch[0], '').trim();
 }
 
-// Extract workspace directory
 const workspaceMatch = systemBlock.match(/Your working directory is: (.*)/);
 const workspace = workspaceMatch ? workspaceMatch[1].trim() : process.cwd();
 
-// Extract heartbeat prompt
 const heartbeatMatch = systemBlock.match(/Heartbeat prompt: (.*)/);
 const heartbeatPrompt = heartbeatMatch ? heartbeatMatch[1].trim() : 'ping';
 
-// Extract HEARTBEAT.md content if present
 let heartbeatContent = '';
-const projectContextRegex = /## .*?HEARTBEAT\.md\n\n([\s\S]*?)(?=\n## |$)/;
-const heartbeatContextMatch = systemBlock.match(projectContextRegex);
+const heartbeatContextMatch = systemBlock.match(/## .*?HEARTBEAT\.md\n\n([\s\S]*?)(?=\n## |$)/);
 if (heartbeatContextMatch) {
     heartbeatContent = heartbeatContextMatch[1].trim();
 }
 
-// Parse command line arguments
+// ---------------------------------------------------------------------------
+// 3. Parse command line arguments
+// ---------------------------------------------------------------------------
+
 let openclawSessionId = 'default';
 let providedSystemPrompt = '';
 let allowedSkillsPathsStr = '';
 
 for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === '--session-id' && i + 1 < process.argv.length) {
-        openclawSessionId = process.argv[i + 1];
-        i++;
+        openclawSessionId = process.argv[++i];
     } else if (process.argv[i] === '--system' && i + 1 < process.argv.length) {
-        providedSystemPrompt = process.argv[i + 1];
-        i++;
+        providedSystemPrompt = process.argv[++i];
     } else if (process.argv[i] === '--allowed-skills' && i + 1 < process.argv.length) {
-        allowedSkillsPathsStr = process.argv[i + 1];
-        i++;
+        allowedSkillsPathsStr = process.argv[++i];
     }
 }
 
-// Load the external prompt template
+// ---------------------------------------------------------------------------
+// 4. Build system prompt from template
+// ---------------------------------------------------------------------------
+
 const templatePath = path.join(__dirname, 'adapter-template.md');
 let systemMdContent = '';
-if (fs.existsSync(templatePath)) {
-    const templateContent = fs.readFileSync(templatePath, 'utf-8');
-
-    // Replace all placeholders
-    systemMdContent = templateContent
-        .replace(/\{\{PROVIDED_SYSTEM_PROMPT\}\}/g, providedSystemPrompt ? `## OpenClaw Dynamic Context\n\n${providedSystemPrompt}\n` : '')
-        .replace(/\{\{WORKSPACE\}\}/g, workspace)
-        .replace(/\{\{HEARTBEAT_PROMPT\}\}/g, heartbeatPrompt)
-        .replace(/\{\{HEARTBEAT_CONTENT\}\}/g, heartbeatContent || 'No HEARTBEAT.md found or it is empty.')
-        .replace(/\{\{CURRENT_TIME\}\}/g, new Date().toLocaleString() + ' (Local)');
-} else {
-    // Fallback error or simple string if template is missing
-    systemMdContent = `# OpenClaw Gemini Gateway\n\nError: adapter-template.md not found.`;
+try {
+    if (fs.existsSync(templatePath)) {
+        const tmpl = fs.readFileSync(templatePath, 'utf-8');
+        systemMdContent = tmpl
+            .replace(/\{\{PROVIDED_SYSTEM_PROMPT\}\}/g, providedSystemPrompt
+                ? `## OpenClaw Dynamic Context\n\n${providedSystemPrompt}\n` : '')
+            .replace(/\{\{WORKSPACE\}\}/g, workspace)
+            .replace(/\{\{HEARTBEAT_PROMPT\}\}/g, heartbeatPrompt)
+            .replace(/\{\{HEARTBEAT_CONTENT\}\}/g, heartbeatContent || 'No HEARTBEAT.md found or it is empty.')
+            .replace(/\{\{CURRENT_TIME\}\}/g, new Date().toLocaleString() + ' (Local)');
+    } else {
+        systemMdContent = `# OpenClaw Gemini Gateway\n\nWarning: adapter-template.md not found. Running with no system prompt.`;
+    }
+} catch (e) {
+    returnError('Failed to load adapter-template.md', e);
 }
 
-// Write the generated system prompt to a temporary file
-const tempSystemMdPath = path.join(os.tmpdir(), `gemini-system-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}.md`);
-fs.writeFileSync(tempSystemMdPath, systemMdContent, 'utf-8');
+// ---------------------------------------------------------------------------
+// 5. Write temporary system-prompt file
+// ---------------------------------------------------------------------------
 
-// Manage isolated GEMINI_CLI_HOME for dynamic skills and MCP.
-// We make this persistent per session so that Gemini CLI's `--resume` works across runs.
+const tempSystemMdPath = path.join(
+    os.tmpdir(),
+    `gemini-system-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}.md`
+);
+try {
+    fs.writeFileSync(tempSystemMdPath, systemMdContent, 'utf-8');
+} catch (e) {
+    returnError('Failed to write temporary system prompt file', e);
+}
+
+// ---------------------------------------------------------------------------
+// 6. Set up isolated GEMINI_CLI_HOME per session
+// ---------------------------------------------------------------------------
+
 const homeBaseDir = path.join(os.homedir(), '.openclaw', 'gemini-sessions');
-let tempHomeDir = path.join(homeBaseDir, openclawSessionId);
+const tempHomeDir = path.join(homeBaseDir, openclawSessionId);
 const tempGeminiDir = path.join(tempHomeDir, '.gemini');
-fs.mkdirSync(tempGeminiDir, { recursive: true });
 
-// Read and merge settings.json
+try {
+    fs.mkdirSync(tempGeminiDir, { recursive: true });
+} catch (e) {
+    returnError(`Failed to create session directory: ${tempGeminiDir}`, e);
+}
+
+// Merge real settings.json with our MCP server injection
 let userSettings = {};
 const realGeminiDir = path.join(os.homedir(), '.gemini');
 const realSettingsPath = path.join(realGeminiDir, 'settings.json');
-if (fs.existsSync(realSettingsPath)) {
-    try {
-        const content = fs.readFileSync(realSettingsPath, 'utf-8');
-        // Handle potential comments in JSON by stripping them or using simple parse (assuming standard JSON for now)
-        // A robust implementation would use a comment-stripping JSON parser, but JSON.parse is fine if the user hasn't hand-edited heavily with comments.
-        // As a simple fallback we try to parse, if fails we start fresh but preserve others.
-        userSettings = JSON.parse(content);
-    } catch (e) {
-        console.error("Failed to parse user settings.json, proceeding with default settings for adapter.");
+try {
+    if (fs.existsSync(realSettingsPath)) {
+        userSettings = JSON.parse(fs.readFileSync(realSettingsPath, 'utf-8'));
     }
+} catch (_) {
+    // Non-fatal: proceed with empty settings
 }
 
-// Inject our dynamic MCP server for OpenClaw
 userSettings.mcpServers = userSettings.mcpServers || {};
-userSettings.mcpServers["openclaw-tools"] = {
-    command: "node",
-    args: [path.join(__dirname, "mcp-server.mjs"), openclawSessionId, workspace]
+userSettings.mcpServers['openclaw-tools'] = {
+    command: 'node',
+    args: [path.join(__dirname, 'mcp-server.mjs'), openclawSessionId, workspace],
 };
 
-// Write the merged settings.json
-fs.writeFileSync(path.join(tempGeminiDir, 'settings.json'), JSON.stringify(userSettings, null, 2), 'utf-8');
+try {
+    fs.writeFileSync(
+        path.join(tempGeminiDir, 'settings.json'),
+        JSON.stringify(userSettings, null, 2),
+        'utf-8'
+    );
+} catch (e) {
+    returnError('Failed to write Gemini settings.json', e);
+}
 
-// Link other essential config files
+// Symlink auth/config files from real ~/.gemini into the isolated home
 const filesToLink = ['oauth_creds.json', 'google_accounts.json', 'installation_id'];
 for (const file of filesToLink) {
     const realFile = path.join(realGeminiDir, file);
-    if (fs.existsSync(realFile)) {
-        try {
-            fs.symlinkSync(realFile, path.join(tempGeminiDir, file));
-        } catch (e) {
-            if (e.code !== 'EEXIST') throw e;
+    if (!fs.existsSync(realFile)) continue;
+    try {
+        fs.symlinkSync(realFile, path.join(tempGeminiDir, file));
+    } catch (e) {
+        if (e.code !== 'EEXIST') {
+            // Non-fatal: log to stderr but continue (auth may still work via env)
+            console.error(`[adapter] Warning: failed to symlink ${file}: ${e.message}`);
         }
     }
 }
 
+// Symlink allowed skills directories
 if (allowedSkillsPathsStr) {
-    const allowedPaths = allowedSkillsPathsStr.split(',').map(p => p.trim()).filter(Boolean);
-    if (allowedPaths.length > 0) {
-        // Create skills directory and link allowed skills
-        const tempSkillsDir = path.join(tempGeminiDir, 'skills');
+    const tempSkillsDir = path.join(tempGeminiDir, 'skills');
+    try {
         fs.mkdirSync(tempSkillsDir, { recursive: true });
-        for (const skillPath of allowedPaths) {
-            if (fs.existsSync(skillPath)) {
-                const skillName = path.basename(skillPath);
-                const linkTarget = path.join(tempSkillsDir, skillName);
-                try {
-                    fs.symlinkSync(skillPath, linkTarget, 'dir');
-                } catch (e) {
-                    if (e.code !== 'EEXIST') console.error(`Failed to symlink skill ${skillPath}: ${e}`);
+        for (const skillPath of allowedSkillsPathsStr.split(',').map(p => p.trim()).filter(Boolean)) {
+            if (!fs.existsSync(skillPath)) continue;
+            const linkTarget = path.join(tempSkillsDir, path.basename(skillPath));
+            try {
+                fs.symlinkSync(skillPath, linkTarget, 'dir');
+            } catch (e) {
+                if (e.code !== 'EEXIST') {
+                    console.error(`[adapter] Warning: failed to symlink skill ${skillPath}: ${e.message}`);
                 }
             }
         }
+    } catch (e) {
+        // Non-fatal: skills may not be available but core functionality continues
+        console.error(`[adapter] Warning: skill setup failed: ${e.message}`);
     }
 }
 
-// Manage Session ID Mapping
+// ---------------------------------------------------------------------------
+// 7. Session ID mapping  (OpenClaw sessionId <-> Gemini CLI sessionId)
+// ---------------------------------------------------------------------------
+
 const mapFilePath = path.join(os.homedir(), '.gemini', 'openclaw-session-map.json');
 let sessionMap = {};
 try {
     if (fs.existsSync(mapFilePath)) {
         sessionMap = JSON.parse(fs.readFileSync(mapFilePath, 'utf-8'));
     }
-} catch (e) {
-    // Ignore mapping read errors
-}
+} catch (_) { /* Ignore: start with empty map */ }
 
 const geminiSessionId = sessionMap[openclawSessionId];
 
-// Prepare Gemini CLI arguments
-const geminiArgs = [
-    '--yolo', // auto-approve tools for autonomy
-    '-o', 'json', // use JSON output to capture the session ID
-    '--allowed-mcp-server-names', 'openclaw-tools'
-];
+// ---------------------------------------------------------------------------
+// 8. Prepare Gemini CLI invocation
+// ---------------------------------------------------------------------------
 
-if (geminiSessionId) {
-    geminiArgs.unshift('--resume', geminiSessionId);
-}
-
-// Find local gemini CLI installation from the backend directory
 const geminiBinPath = path.join(__dirname, 'node_modules', '.bin', 'gemini');
 const commandToRun = fs.existsSync(geminiBinPath) ? geminiBinPath : 'gemini';
 
-// Execute Gemini CLI
+const GEMINI_TIMEOUT_MS = 120_000; // 2 minutes
+
+const baseGeminiArgs = [
+    '--yolo',
+    '-o', 'json',
+    '--allowed-mcp-server-names', 'openclaw-tools',
+];
+
+const geminiArgs = geminiSessionId
+    ? ['--resume', geminiSessionId, ...baseGeminiArgs]
+    : [...baseGeminiArgs];
+
 const env = {
     ...process.env,
     GEMINI_SYSTEM_MD: tempSystemMdPath,
+    GEMINI_CLI_HOME: tempHomeDir,
 };
 
-if (tempHomeDir) {
-    env.GEMINI_CLI_HOME = tempHomeDir;
-}
+/**
+ * Run Gemini CLI synchronously.
+ * Returns { stdout, stderr, status } on success, or { error } on failure.
+ */
+function runGemini(args) {
+    const result = spawnSync(commandToRun, args, {
+        env,
+        input: userMessage,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: GEMINI_TIMEOUT_MS,
+    });
 
-const child = spawnSync(commandToRun, geminiArgs, {
-    env,
-    input: userMessage,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'inherit']
-});
-
-// Clean up temporary home directory has been removed to persist session history.
-
-
-// Clean up temporary system md
-if (fs.existsSync(tempSystemMdPath)) {
-    try {
-        fs.rmSync(tempSystemMdPath);
-    } catch (e) { }
-}
-
-// Process Gemini's output
-if (child.stdout) {
-    try {
-        const rawOutput = child.stdout.trim();
-        const jsonStartIndex = rawOutput.indexOf('{');
-        if (jsonStartIndex >= 0) {
-            const jsonStr = rawOutput.substring(jsonStartIndex);
-            const outputData = JSON.parse(jsonStr);
-
-            // Print the actual response text to OpenClaw
-            if (outputData.response) {
-                process.stdout.write(outputData.response);
-            } else if (outputData.responseText) {
-                process.stdout.write(outputData.responseText);
-            }
-
-            // Save session mapping if we got a valid session ID
-            const newSessionId = outputData.session_id || outputData.sessionId;
-            if (newSessionId && newSessionId !== geminiSessionId) {
-                sessionMap[openclawSessionId] = newSessionId;
-                if (!fs.existsSync(path.dirname(mapFilePath))) {
-                    fs.mkdirSync(path.dirname(mapFilePath), { recursive: true });
-                }
-                fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8');
-            }
-        } else {
-            // Fallback
-            process.stdout.write(rawOutput);
-        }
-    } catch (e) {
-        // Fallback if parsing fails
-        process.stdout.write(child.stdout);
+    if (result.error) {
+        const msg = result.error.code === 'ETIMEDOUT'
+            ? `Gemini CLI timed out after ${GEMINI_TIMEOUT_MS / 1000}s (no-output watchdog or network hang)`
+            : `Gemini CLI failed to start: ${result.error.message}`;
+        return { error: msg };
     }
+
+    if (result.status !== 0) {
+        const stderr = (result.stderr || '').trim();
+        return {
+            error: `Gemini CLI exited with code ${result.status}${stderr ? ': ' + stderr.substring(0, 500) : ''}`,
+        };
+    }
+
+    return { stdout: result.stdout || '', stderr: result.stderr || '' };
+}
+
+// ---------------------------------------------------------------------------
+// 9. Execute (with automatic --resume fallback)
+// ---------------------------------------------------------------------------
+
+let runResult = runGemini(geminiArgs);
+
+// If --resume failed, clear stale mapping and retry as a fresh session
+if (runResult.error && geminiSessionId) {
+    console.error(`[adapter] --resume failed (${runResult.error}). Clearing stale session and retrying...`);
+    delete sessionMap[openclawSessionId];
+    try { fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8'); } catch (_) {}
+    runResult = runGemini(baseGeminiArgs);
+}
+
+// Clean up temporary system prompt file
+try { fs.rmSync(tempSystemMdPath); } catch (_) {}
+
+// ---------------------------------------------------------------------------
+// 10. Process output → return to OpenClaw
+// ---------------------------------------------------------------------------
+
+if (runResult.error) {
+    // Always return something so OpenClaw doesn't hang silently
+    process.stdout.write(`⚠️ Gemini Backend Error: ${runResult.error}`);
+    process.exit(0);
+}
+
+const rawOutput = (runResult.stdout || '').trim();
+
+if (!rawOutput) {
+    process.stdout.write('⚠️ Gemini Backend: Gemini CLI returned no output.');
+    process.exit(0);
+}
+
+// Try to parse as JSON (Gemini CLI -o json format)
+const jsonStart = rawOutput.indexOf('{');
+if (jsonStart < 0) {
+    // Not JSON — return as-is (plain text mode)
+    process.stdout.write(rawOutput);
+    process.exit(0);
+}
+
+try {
+    const outputData = JSON.parse(rawOutput.substring(jsonStart));
+
+    // Extract response text
+    const responseText = outputData.response || outputData.responseText;
+    if (responseText) {
+        process.stdout.write(responseText);
+    } else {
+        // Unexpected JSON shape — return raw so we can see what it is
+        process.stdout.write(rawOutput);
+    }
+
+    // Persist new Gemini session ID for future --resume
+    const newSessionId = outputData.session_id || outputData.sessionId;
+    if (newSessionId && newSessionId !== geminiSessionId) {
+        sessionMap[openclawSessionId] = newSessionId;
+        try {
+            fs.mkdirSync(path.dirname(mapFilePath), { recursive: true });
+            fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8');
+        } catch (_) {}
+    }
+} catch (_) {
+    // JSON parse failed — return raw output as text
+    process.stdout.write(rawOutput);
 }
