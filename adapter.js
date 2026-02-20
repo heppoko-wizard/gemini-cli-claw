@@ -201,14 +201,12 @@ const filesToLink = ['oauth_creds.json', 'google_accounts.json', 'installation_i
 for (const file of filesToLink) {
     const realFile = path.join(realGeminiDir, file);
     if (!fs.existsSync(realFile)) continue;
-    try {
-        fs.symlinkSync(realFile, path.join(tempGeminiDir, file));
-    } catch (e) {
-        if (e.code !== 'EEXIST') {
-            // Non-fatal: log to stderr but continue (auth may still work via env)
-            console.error(`[adapter] Warning: failed to symlink ${file}: ${e.message}`);
+        try {
+            // Windowsでの管理者権限エラー(EPERM)を回避するため、ファイルはシンボリックリンクではなくハードコピーする
+            fs.copyFileSync(realFile, path.join(tempGeminiDir, file));
+        } catch (e) {
+            console.error(`[adapter] Warning: failed to copy ${file}: ${e.message}`);
         }
-    }
 }
 
 // Symlink allowed skills directories
@@ -220,7 +218,8 @@ if (allowedSkillsPathsStr) {
             if (!fs.existsSync(skillPath)) continue;
             const linkTarget = path.join(tempSkillsDir, path.basename(skillPath));
             try {
-                fs.symlinkSync(skillPath, linkTarget, 'dir');
+                // 'junction' を使用することで、Windows（開発者モード非依存）でも管理者権限なしにディレクトリリンクを作成可能
+                fs.symlinkSync(skillPath, linkTarget, 'junction');
             } catch (e) {
                 if (e.code !== 'EEXIST') {
                     console.error(`[adapter] Warning: failed to symlink skill ${skillPath}: ${e.message}`);
