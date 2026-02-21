@@ -19,3 +19,10 @@ Thumbs.db
 
 # ビルド成果物
 dist/
+adapter.log
+adapter.pid
+*.bak
+*.resolved
+*.resolved.*
+*.metadata.json
+*.pb

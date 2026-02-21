@@ -54,10 +54,15 @@ function randomId() {
 }
 
 /**
- * Write an SSE data event to the response.
+ * Write an SSE event to the response.
+ * If eventType is provided, sends `event: <type>\n` before data line.
  */
-function sseWrite(res, data) {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+function sseWrite(res, data, eventType) {
+    if (eventType) {
+        res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+    } else {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +106,7 @@ function extractText(content) {
     if (typeof content === 'string') return content;
     if (!Array.isArray(content)) return '';
     return content
-        .filter(p => p && p.type === 'text' && typeof p.text === 'string')
+        .filter(p => p && (p.type === 'text' || p.type === 'input_text') && typeof p.text === 'string')
         .map(p => p.text)
         .join('');
 }
@@ -309,8 +314,8 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
         args.push(`@${mp}`);
     }
 
-    // Use -p argument directly (safer and more reliable than stdin)
-    args.push('-p', prompt);
+    // Use positional argument directly for prompt (as defined in gemini-cli help)
+    args.push(prompt);
 
     log(`spawn: ${commandToRun} ${args.slice(0, 4).join(' ')} ... (prompt ${prompt.length}ch)`);
 
@@ -321,9 +326,39 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
 
     let buffer = '';
     let fullText = '';
+    let sequenceNumber = 0;
+    const responseId = `resp_${requestId}`;
+    const outputIndex = 0;
+    const contentIndex = 0;
+
+    // Send initial Responses API events
+    sseWrite(res, {
+        type: 'response.created',
+        response: { id: responseId, object: 'response', status: 'in_progress', output: [] },
+    }, 'response.created');
+
+    sseWrite(res, {
+        type: 'response.in_progress',
+        response: { id: responseId, status: 'in_progress' },
+    }, 'response.in_progress');
+
+    sseWrite(res, {
+        type: 'response.output_item.added',
+        output_index: outputIndex,
+        item: { type: 'message', role: 'assistant', id: `msg_${requestId}`, content: [] },
+    }, 'response.output_item.added');
+
+    sseWrite(res, {
+        type: 'response.content_part.added',
+        output_index: outputIndex,
+        content_index: contentIndex,
+        part: { type: 'output_text', text: '' },
+    }, 'response.content_part.added');
 
     geminiProcess.stdout.on('data', chunk => {
-        buffer += chunk.toString('utf-8');
+        const raw = chunk.toString('utf-8');
+        log(`[stdout] ${raw.substring(0, 200)}`);
+        buffer += raw;
 
         let boundary = buffer.indexOf('\n');
         while (boundary !== -1) {
@@ -355,21 +390,25 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
                     if (json.content) {
                         fullText += json.content;
                         sseWrite(res, {
-                            id: `chatcmpl-${requestId}`,
-                            object: 'chat.completion.chunk',
-                            choices: [{ index: 0, delta: { content: json.content }, finish_reason: null }],
-                        });
+                            type: 'response.output_text.delta',
+                            output_index: outputIndex,
+                            content_index: contentIndex,
+                            delta: json.content,
+                            sequence_number: sequenceNumber++,
+                        }, 'response.output_text.delta');
                     }
                     break;
 
                 case 'message':
-                    if (json.role === 'assistant' && json.delta && json.content) {
+                    if (json.role === 'assistant' && json.content) {
                         fullText += json.content;
                         sseWrite(res, {
-                            id: `chatcmpl-${requestId}`,
-                            object: 'chat.completion.chunk',
-                            choices: [{ index: 0, delta: { content: json.content }, finish_reason: null }],
-                        });
+                            type: 'response.output_text.delta',
+                            output_index: outputIndex,
+                            content_index: contentIndex,
+                            delta: json.content,
+                            sequence_number: sequenceNumber++,
+                        }, 'response.output_text.delta');
                     }
                     break;
 
@@ -378,19 +417,23 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
                     const notice = `\n\n🔧 [Gemini: executing ${toolName}...]\n`;
                     fullText += notice;
                     sseWrite(res, {
-                        id: `chatcmpl-${requestId}`,
-                        object: 'chat.completion.chunk',
-                        choices: [{ index: 0, delta: { content: notice }, finish_reason: null }],
-                    });
+                        type: 'response.output_text.delta',
+                        output_index: outputIndex,
+                        content_index: contentIndex,
+                        delta: notice,
+                        sequence_number: sequenceNumber++,
+                    }, 'response.output_text.delta');
                     break;
                 }
 
                 case 'error':
                     sseWrite(res, {
-                        id: `chatcmpl-${requestId}`,
-                        object: 'chat.completion.chunk',
-                        choices: [{ index: 0, delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` }, finish_reason: null }],
-                    });
+                        type: 'response.output_text.delta',
+                        output_index: outputIndex,
+                        content_index: contentIndex,
+                        delta: `\n⚠️ ${json.message || JSON.stringify(json)}`,
+                        sequence_number: sequenceNumber++,
+                    }, 'response.output_text.delta');
                     break;
             }
         }
@@ -400,28 +443,56 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
     geminiProcess.stderr.on('data', chunk => { stderr += chunk.toString('utf-8'); });
 
     geminiProcess.on('close', code => {
-        if (code !== 0 && stderr.trim()) {
-            log(`Gemini CLI exited ${code}: ${stderr.trim().substring(0, 300)}`);
+        log(`Gemini CLI process closed with code ${code}. fullText length: ${fullText.length}`);
+        if (stderr.trim()) {
+            log(`Gemini CLI stderr: ${stderr.trim().substring(0, 300)}`);
         }
 
-        // Send the stop chunk
+        // Send completion events in Responses API format
         sseWrite(res, {
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion.chunk',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        });
-        res.write('data: [DONE]\n\n');
+            type: 'response.output_text.done',
+            output_index: outputIndex,
+            content_index: contentIndex,
+            text: fullText,
+        }, 'response.output_text.done');
+
+        sseWrite(res, {
+            type: 'response.content_part.done',
+            output_index: outputIndex,
+            content_index: contentIndex,
+            part: { type: 'output_text', text: fullText },
+        }, 'response.content_part.done');
+
+        sseWrite(res, {
+            type: 'response.output_item.done',
+            output_index: outputIndex,
+            item: {
+                type: 'message', role: 'assistant', id: `msg_${requestId}`,
+                content: [{ type: 'output_text', text: fullText }],
+            },
+        }, 'response.output_item.done');
+
+        sseWrite(res, {
+            type: 'response.completed',
+            response: {
+                id: responseId, object: 'response', status: 'completed',
+                output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: fullText }] }],
+                usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+            },
+        }, 'response.completed');
+
         res.end();
     });
 
     geminiProcess.on('error', err => {
         log(`Gemini CLI failed to start: ${err.message}`);
         sseWrite(res, {
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion.chunk',
-            choices: [{ index: 0, delta: { content: `⚠️ Gemini CLI failed to start: ${err.message}` }, finish_reason: 'stop' }],
-        });
-        res.write('data: [DONE]\n\n');
+            type: 'response.failed',
+            response: {
+                id: responseId, object: 'response', status: 'failed',
+                error: { type: 'server_error', message: `Gemini CLI failed to start: ${err.message}` },
+            },
+        }, 'response.failed');
         res.end();
     });
 
@@ -430,11 +501,12 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
         log('Gemini CLI timed out — killing process');
         geminiProcess.kill('SIGTERM');
         sseWrite(res, {
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion.chunk',
-            choices: [{ index: 0, delta: { content: '\n⚠️ Gemini CLI timed out.' }, finish_reason: 'stop' }],
-        });
-        res.write('data: [DONE]\n\n');
+            type: 'response.output_text.delta',
+            output_index: outputIndex,
+            content_index: contentIndex,
+            delta: '\n⚠️ Gemini CLI timed out.',
+            sequence_number: sequenceNumber++,
+        }, 'response.output_text.delta');
         res.end();
     }, GEMINI_TIMEOUT_MS);
 
@@ -459,6 +531,7 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
+    log(`Incoming request: ${req.method} ${url.pathname}`);
 
     // Health check
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -468,7 +541,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Models endpoint (OpenClaw probes this)
-    if (req.method === 'GET' && url.pathname === '/v1/models') {
+    if (req.method === 'GET' && (url.pathname === '/v1/models' || url.pathname === '/models')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             object: 'list',
@@ -478,16 +551,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Chat completions
-    if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+    if (req.method === 'POST' && (url.pathname === '/v1/chat/completions' || url.pathname === '/chat/completions' || url.pathname === '/responses')) {
         let body;
-        try { body = await readBody(req); }
+        try {
+            body = await readBody(req);
+            fs.writeFileSync('/tmp/adapter_last_req.json', JSON.stringify(body, null, 2), 'utf-8');
+            log(`Request body saved to /tmp/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
+        }
         catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: e.message }));
             return;
         }
 
-        const messages    = body.messages || [];
+        const messages    = body.messages || body.input || [];
         const stream      = body.stream !== false; // default true
         const sessionKey  = body._openclawSessionKey || body._sessionId || 'default';
         const workspaceDir = body._workspaceDir || process.cwd();
