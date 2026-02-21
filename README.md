@@ -1,201 +1,100 @@
-# gemini-cli-claw v0.1
+# OpenClaw Gemini CLI Adapter (gemini-cli-claw)
 
-OpenClawの強力な自律駆動システムと、Googleの公式「[Gemini CLI](https://github.com/google-gemini/gemini-cli)」を**直接かつ安全に**接続するための専用ゲートウェイ（アダプタ）です。
+[OpenClaw](https://github.com/mariozechner/openclaw) のバックエンド推論エンジンとして、Google公式の [Gemini CLI](https://github.com/google/gemini-cli) を直接接続するためのアダプタツールです。
+Gemini CLI そのものに「自立駆動型エージェント」としての側面を与え、OpenClawの強力な自律性とスキル群をGemini CLIから直接扱えるようにします。
 
-**対応OS: Linux / macOS / Windows**  
-*(※ v0.1 現在、フルテストが完了しているのは Linux 環境のみとなります。Windows / macOS 向けの動作機構は組み込まれていますが、予期せぬ動作をする可能性があります。)*
+## 開発の背景
 
-## 🌟 開発の背景と目的
-近年、Gemini（あるいはそれに類するサービス）の内部Google OAuth認証トークンを無断で抽出し、別の非公式ツールに流用する「認証の悪用（トークンスティーラー）」が一時的に流行しました。しかし、Google側はこうした不正なアクセスパターンを検知し始めており、**トークンを不正利用したユーザーのGoogleアカウント自体がBanning（停止処分）される事例**が増加しています。
+近年、Gemini CLIのGoogle OAuth認証ロジックを非公式に流用したサードパーティツールの流行により、ユーザーのアカウントが停止される事例が多数報告されています。
+本ツールはこのような「認証の流用」を行わず、**「OpenClawのシステムが、ユーザーのローカル環境にある正規のGemini CLIコマンドを直接起動して操作する」** というアーキテクチャを採用することで、アカウントリスクを回避しつつ安全にエージェント環境を構築することを目的に制作されました。
 
-このプロジェクトは、そうした**「認証の流用」という危険なアプローチを完全に捨て去り**、OpenClawのシステムが「ユーザー環境にインストールされた本物のGemini CLIプロセスそのもの」を直接バックエンドとして起動・操作するアーキテクチャを採用しました。
-安全な公式ツールを通してのみ推論を行うため、**アカウント凍結のリスクなしに**OpenClawの自律駆動機能とGeminiの強大なパワーを組み合わせることができます。
+## 機能・メリット
 
-## ✨ 主なメリットと機能
+*   **完全無料でのエージェント体験**: APIキーは不要です。Googleアカウントで `gemini login` を行うだけで、無料で自律駆動型エージェントを利用できます。
+*   **検索グラウンディング対応**: Gemini CLIが持つ「Google検索グラウンディング」機能がそのまま利用できるため、無料で最新情報にアクセスした推論が可能です。
+*   **マルチモーダル完全対応**: 画像などのファイルを直接読み込ませての推論に対応しています。
+*   **動的MCPサーバーのネイティブ統合**: OpenClawの強力なツール群（`browser`, `cron`, `sessions_send` など）を、Gemini CLIがネイティブに認識できる **MCP (Model Context Protocol)** サーバー形式で自動マッピングし提供します。これにより完全な相互運用環境が実現されています。
+*   **OpenClawの基盤スキル活用**: OpenClawが持つ「Heartbeat（自律鼓動）」やファイルシステムアクセス、スケジューリングなどのシステムがGemini CLIでそのまま動作するよう設計されています。
+*   **独立した安全な隔離環境**: 実行時に独自のセッションと分離されたテンポラリ環境（`GEMINI_CLI_HOME`）を構築し、許可されたスキルのみを安全に連携させます。
 
-### 1. 無料で強力なAIアシスタントを構築
-APIキー（従量課金）の取得は不要です。Googleアカウントを使って公式Gemini CLIにログインするだけで、強力な自律型エージェント環境を**完全無料**で体験できます。
+## 必要条件
+*   コマンドライン環境と基本的なツール (`git`, `curl` 等)
+*   Googleアカウント（セットアップ時にブラウザでのログインが必要です）
+*   *※ Node.js(v18+) や OpenClaw本体 は、インストーラーが不足を検知し自動的にダウンロード・設定を行います。*
 
-### 2. Google検索グラウンディングの標準搭載
-公式のGemini CLIをそのまま利用しているため、有償APIを使わなくても**Google検索（グラウンディング）**の能力をフルに活用できます。最新のWEB情報にアクセスしながら、エージェントがタスクを遂行します。
+## インストール (クイックスタート)
 
-### 3. マルチモーダル対応
-Geminiの持つマルチモーダル能力をそのまま引き継いでいます。ローカル画像の読み込みや分析など、高度な推論タスクにも自然に対応可能です。
+もっとも簡単な方法は、同梱されている自動セットアップスクリプトを実行することです。
+このスクリプトは、環境チェック、OpenClaw本体のクローン・ビルド、アダプタの登録(`openclaw.json`)、そしてGemini APIの認証(`gemini login`)の全てを全自動で行います。
 
-### 4. OpenClawのスキル・ツール群との完全互換
-OpenClaw上で定義されているスキル（`SKILL.md`）やツール群は、本アダプタを経由して安全・確実にGemini CLI側へ引き継がれます。
-本リポジトリはGemini CLIを単なるチャットツールから、ファイルの自動編集、コマンド実行、ハートビートによる定期起動をこなす**「自立駆動型エージェント」**へと進化させます。
+**【⚠️ インストール時の重要事項】**
+*   **インストール時間の長さ:** OpenClaw本体のビルド（TypeScriptコンパイル等）や、連携専用のGemini CLIを含むnpmパッケージのダウンロードをすべて一括で行うため、環境によっては**完了までにかなりの時間（数分以上）がかかります。** ターミナルが止まっているように見えても、完了メッセージが出るまで閉じずにお待ちください。
+*   **専用のGemini CLI環境:** このインストーラーはシステム環境を汚染しないよう、グローバルではなく本ツール専用の `gemini-cli` をこのリポジトリ直下(`node_modules`)に直接ダウンロードして隔離利用します。
 
-### 5. 仮想ホームディレクトリによる「スキルの完全隔離」
-Gemini CLIの仕様上、通常はローカルに存在するすべてのグローバルスキルが無条件で読み込まれてしまいます。本アダプタは実行ごとに一時的な**仮想ホームディレクトリ（GEMINI_CLI_HOME）**を動的生成し、OpenClawのサンドボックス検証を通過したスキルのみをそこにシンボリックリンクとして注入します。これにより、不要なコンテキスト汚染を防ぎ、極めてセキュアなエージェント制御を実現しています。
+### 実行手順
 
-### 6. AI自身による「プロンプトの自己進化（Self-Optimization）」
-システムプロンプトの枠組みは、独立したMarkdownファイル（`adapter-template.md`）として分離されています。これにより、Gemini CLI自身に対して「現在の自分のプロンプト（adapter-template.md）を読み込み、より自律的なエージェントになるよう最適化して上書きせよ」と指示することで、**AI自身が自らの振る舞いのルールを分析し、コードを書かずに自己進化していく**ことが可能です。
+**既にOpenClawをご利用中（インストール済み）の方:**
+必ず、ダウンロードしたこの `gemini-cli-claw` フォルダごと、既存の `openclaw` フォルダの**直下**に移動させてからインストールスクリプトを実行してください。
+（配置例: `openclaw/gemini-cli-claw/install.bat` となるように配置する）
 
-## 🚀 仕組み（Architecture）
+**まだOpenClawを導入していない一番最初の方:**
+任意のフォルダで以下のスクリプトを実行すれば、インストーラーが自動的にOpenClaw本体をダウンロード(git clone)して構築まで行います。
 
-```text
-OpenClaw デーモン
-    │  (stdin/stdout)
-    ▼
-adapter.js          ← OpenClawのコンテキストをGemini CLIのプロンプトへ翻訳し、特殊な環境変数で隔離起動
-    │  (子プロセス)
-    ▼
-Gemini CLI          ← 公式ツールとして推論・ツール呼び出しを実行
-    │  (MCP stdio)
-    ▼
-mcp-server.mjs      ← OpenClawのツール群（Slack送信、スケジューラ等）をMCP経由で提供
-    │  (import)
-    ▼
-OpenClaw tools
-```
-
-## 📁 ファイル構成
-
-| ファイル | 役割 |
-|---|---|
-| `adapter.js` | OpenClaw↔Gemini CLI のブリッジ（CJS、メインアダプター） |
-| `adapter-template.md` | Gemini CLIへのシステムプロンプトテンプレート（AIが自己最適化可能） |
-| `mcp-server.mjs` | OpenClawツールをMCP経由で公開するサーバー（ESM） |
-| `setup.js` | インストールスクリプト（クロスプラットフォーム） |
-| `package.json` | 依存関係（`@google/gemini-cli`, `@modelcontextprotocol/sdk`） |
-
-## 📥 超簡単インストール（依存関係不要）
-
-本ゲートウェイは、**ユーザーの事前準備を極限までゼロ**にするため、強力な自動構築スクリプト（`install.sh` 及び `setup.js`）を搭載しています。
-※ Node.js がシステムに無い場合でも、`install.sh` が自動検出して NVM 経由で導入するため、事前の個別インストールは一切不要です！
-
-**セットアップ手順**
-
-### 🍏🐧 macOS / Linux の場合
-
+**Linux / macOS:**
 ```bash
-# フルオート・インストーラーの実行
+# このリポジトリフォルダに移動して以下を実行
+chmod +x install.sh
 ./install.sh
 ```
 
-### 🪟 Windows の場合
-
+**Windows:**
+エクスプローラーからこのフォルダ内の `install.bat` をダブルクリックするか、コマンドプロンプトで以下を実行してください。
 ```cmd
-:: フルオート・インストーラーの実行
 install.bat
 ```
 
----
+## 使い方
 
-実行後、インストーラーが以下の全工程を**対話的かつ完全自動**で完了させます：
-1. **Node.jsの確認・自動インストール**（未導入の場合のみ）
-2. 言語選択（日本語/English）
-3. OpenClaw本体のビルド状態の確認と自動ビルド
-4. Gemini Backend（本アダプタ）の npm 依存関係のインストール
-5. `~/.openclaw/openclaw.json` への `gemini-adapter` バックエンドの自動登録と環境構築
-6. Gemini CLIの認証状況チェックと対話型自動ログインのサポート（ブラウザレスでのQRログイン）
-
-## ⚙️ 詳細な仕様と既存環境への統合
-
-すでに ご自身のマシンに OpenClaw のリポジトリが存在する場合の、詳細な統合仕様は以下の通りです。
-
-### 1. フォルダの配置場所
-本リポジトリ（`gemini-cli-claw` フォルダ）は、必ず**OpenClawのルートディレクトリの直下**に配置してください。
-インストーラ（`setup.js`）は、自身が置かれた場所の「1つ上の階層（`..`）」をOpenClawのルートとみなしてビルド等の検知を行います。
-
-✅ **正しい配置の例**:
-```text
-openclaw/
-├── src/
-├── package.json
-└── gemini-cli-claw/   <-- ここに配置
-    ├── adapter.js
-    ├── install.sh
-    └── package.json
-```
-
-### 2. 設定ファイル (`openclaw.json`) の自動変更箇所
-インストーラを実行すると、OpenClawのグローバル設定ファイル（`~/.openclaw/openclaw.json`）に対し、以下のプロバイダ設定が**パスを絶対パスに解決した上で自動追記**されます。
+OpenClawの設定 (`openclaw.json`) にて、メインの推論エンジンをGeminiアダプタに切り替えて使用します。
 
 ```json
-{
-  "agents": {
-    "defaults": {
-      "cliBackends": {
-        "gemini-adapter": {
-          "command": "node",
-          "input": "stdin",
-          "output": "text",
-          "systemPromptArg": "--system",
-          "args": [
-            "/絶対パス/openclaw/gemini-cli-claw/adapter.js",
-            "--session-id",
-            "{sessionId}",
-            "--allowed-skills",
-            "{allowedSkillsPaths}"
-          ],
-          "resumeArgs": [
-            /* 同上 */
-          ]
-        }
-      }
-    }
-  }
+"models": {
+  "primary": "gemini-adapter/default"
 }
 ```
 
-※ この追記により、OpenClawは「`gemini-adapter` という名前のバックエンドを呼び出すと、引数とともに `adapter.js` をNode.jsで実行すればよい」ということを学習します。既存の設定を破壊することはありません。
+設定後、通常通りOpenClawのCLIやTelegram/Discordインターフェースからメッセージを送信すると、バックエンドでGemini CLIが起動し、応答を返します。
 
-## 🎮 使い方
+## アーキテクチャ
 
-### 単発でのテスト実行
-まずは正しくGemini CLI経由で接続できているか、OpenClawのルートディレクトリ（`openclaw/`）から以下のコマンドでテストできます（`--local`フラグをつけることで実験できます）。
+本アダプタは、以下の2つの処理に徹した「翻訳層」として動作します。Gemini CLI本体やOpenClaw本体（TypeScriptのビルド）に直接手を加える面倒な作業は発生しません。
 
-```bash
-node scripts/run-node.mjs agent -m "こんにちは" --local
-```
+1. **スキルの隔離**:
+   OpenClawから渡される「使用許可されたスキル」だけをシンボリックリンクでGemini側に提供し、Gemini CLIの暴走を防ぎます。
+2. **システムプロンプトの中継**:
+   OpenClawが動的生成するコンテキスト（`<system>...</system>`）を抽出し、そのままGemini CLIの `GEMINI_SYSTEM_MD` としてセットし、ネイティブなエージェントワークフローを成立させます。
 
-### デフォルトの推論エンジンとして常駐させる
-OpenClawのデフォルトプロバイダをGeminiに切り替えるには、`~/.openclaw/openclaw.json` を以下のように編集（追記）します。
+## 制限事項・トラブルシューティング
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "provider": "gemini-adapter"
-    }
-  }
-}
-```
+*   **APIの利用制限 (Rate Limit)**: 無料のGemini APIを利用している場合、短時間の過度なリクエストにより制限（429 Too Many Requests）に引っかかる場合があります。
+*   **認証の有効期限**: Gemini CLIのログインセッションが切れた場合は、再度当該ディレクトリ（`gemini-cli-claw`内）で `npx gemini login` を実行して再認証を行ってください。
+*   **非対応のツール**: 現時点でOpenClawの一部の極度に複雑なシステム管理ツールは、Gemini側の制約により完全に動作しない場合があります。
 
-この設定を行うことで、OpenClawデーモンの再起動以降、チャット（Telegram, Signal等）やCron、セッション思考の**すべての推論エンジンが無料で強力な `Gemini CLI` に恒久的に切り替わります**。
+## 開発ロードマップ (Roadmap)
 
-## MCP ツール
+現在、このアダプタはコア機能（安全なアクセス、コンテキスト中継、基本環境の隔離）に特化して安定稼働していますが、アーキテクチャ上の致命的な欠落（コンテキスト剪定の乖離など）に関する詳細は [KNOWN_ISSUES.md](KNOWN_ISSUES.md) を参照してください。
 
-Gemini CLI から利用可能な OpenClaw 固有ツール（`mcp-server.mjs` が公開）:
+今後の主な機能追加・改修として以下を計画しています。
 
-| ツール | 説明 |
-|---|---|
-| `message` | Discord / Telegram 等へのメッセージ送信 |
-| `cron` | スケジュール実行・リマインダー |
-| `sessions_send` | 別セッションへのメッセージ送信 |
-| `sessions_spawn` | バックグラウンドサブエージェントの起動 |
-| `subagents` | サブエージェントの管理 |
-| `web_search` | Brave Search API による Web 検索 |
-| `web_fetch` | URL からコンテンツ取得 |
-| `memory_search` | 記憶の意味的検索 |
-| `gateway` | OpenClaw ゲートウェイの設定・再起動 |
+*   **ストリーミング出力への対応:** 
+    現在はJSON形式の出力を用いたセッションIDの確実な取得のため、処理が完全に終わってからOpenClawへ結果を一括返却する同期的な動きになっています。これをストリーミングで徐々に文字を出力し、よりネイティブな使用感に近づける改修を検討しています。
+*   **マルチセッションでの高度なコンテキスト剪定 (Pruning):**
+    トークン上限に達した際の履歴のガベージコレクションについて、Gemini CLI側の履歴とOpenClaw側のコンテキストのズレを完璧に同期するための高度な状態管理。
 
-Gemini CLI 自身が持つファイル操作・シェル実行ツールと重複するもの (`read`, `write`, `exec` 等) は自動的に除外されます。
+## アンインストール
 
-## カスタマイズ
+このアダプタを削除して元のOpenClawの状態に戻すには以下の手順を行ってください。
 
-### システムプロンプトの編集
-
-`adapter-template.md` を直接編集することで Gemini CLI のティラの振る舞いをカスタマイズできます。
-また、Gemini CLI 自身に `adapter-template.md` を分析・改善させる「自己最適化」も可能です。
-
-### プロンプトの変数
-
-| 変数 | 内容 |
-|---|---|
-| `{{PROVIDED_SYSTEM_PROMPT}}` | OpenClaw が動的生成するコアプロンプト |
-| `{{WORKSPACE}}` | ワークスペースディレクトリのパス |
-| `{{HEARTBEAT_PROMPT}}` | ハートビートの指示 |
-| `{{HEARTBEAT_CONTENT}}` | HEARTBEAT.md の内容 |
+1. `~/.openclaw/openclaw.json` を開き、`models.primary` を元の値（例: `anthropic-messages/claude-sonnet-3-5` など）に戻します。
+2. `openclaw.json` の `cliBackends` に追加された `"gemini-adapter"` のブロックを削除します。
+3. リポジトリフォルダ (`gemini-cli-claw`) を削除します。システム全体（グローバル）への影響は一切残らず、クリーンに削除されます。

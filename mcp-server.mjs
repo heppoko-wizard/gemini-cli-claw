@@ -91,6 +91,21 @@ const server = new Server(
     }
 );
 
+const activeRequests = new Map();
+
+// Handle Cancellation
+server.onnotification = (notification) => {
+    if (notification.method === "notifications/cancelled") {
+        const requestId = notification.params?.requestId;
+        if (requestId && activeRequests.has(requestId)) {
+            console.error(`[MCP Adapter] Received cancellation for request: ${requestId}`);
+            const abortController = activeRequests.get(requestId);
+            abortController.abort();
+            activeRequests.delete(requestId);
+        }
+    }
+};
+
 // Handle "ListTools" — returns the schema of all available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -103,14 +118,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // Handle "CallTool" — dispatches to OpenClaw's native tool.execute()
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const toolName = request.params.name;
     const toolArgs = request.params.arguments || {};
+    const progressToken = request.params._meta?.progressToken;
+    const requestId = extra?.requestId || request.id; // Depending on SDK exact shape
 
     const targetTool = openclawTools.find(t => t.name === toolName);
 
     if (!targetTool) {
-        // Return a structured error instead of throwing, to avoid crashing the server
         return {
             content: [{
                 type: "text",
@@ -120,27 +136,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 
-    try {
-        console.error(`[MCP Adapter] Executing tool: ${toolName}`);
+    const abortController = new AbortController();
+    if (requestId) {
+        activeRequests.set(requestId, abortController);
+    }
 
-        // AgentTool.execute() signature:
-        //   execute(toolCallId: string, params: object, signal?: AbortSignal, onUpdate?: callback)
-        // - toolCallId: a unique ID for this invocation (used for process tracking)
-        // - params: the tool arguments from the MCP request
-        // - signal: optional AbortSignal for cancellation
-        // - onUpdate: optional callback for intermediate progress
+    try {
+        console.error(`[MCP Adapter] Executing tool: ${toolName} (progressToken: ${progressToken})`);
+
         const toolCallId = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const result = await targetTool.execute(
             toolCallId,
             toolArgs,
-            undefined, // no AbortSignal for now
+            abortController.signal,
             (update) => {
-                // Log intermediate updates to stderr (not visible to Gemini CLI)
                 console.error(`[MCP Adapter] ${toolName} [update]:`, JSON.stringify(update).slice(0, 200));
+                if (progressToken) {
+                    server.notification({
+                        method: "notifications/progress",
+                        params: {
+                            progressToken: progressToken,
+                            progress: typeof update.progress === 'number' ? update.progress : 0,
+                            total: 100,
+                            data: update.message || JSON.stringify(update)
+                        }
+                    }).catch(e => console.error("[MCP Adapter] Failed to emit progress:", e));
+                }
             }
         );
 
-        // Normalize the AgentToolResult to MCP content format
+        if (requestId) activeRequests.delete(requestId);
+
         let responseText;
         if (result == null) {
             responseText = "(no output)";
@@ -159,6 +185,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }],
         };
     } catch (error) {
+        if (requestId) activeRequests.delete(requestId);
         console.error(`[MCP Adapter] Error executing ${toolName}:`, error);
         return {
             content: [{

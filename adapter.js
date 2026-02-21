@@ -5,7 +5,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
@@ -90,15 +90,6 @@ userMessage = userMessage.replace(mediaAttachedPattern, '').replace(messageImage
 const workspaceMatch = systemBlock.match(/Your working directory is: (.*)/);
 const workspace = workspaceMatch ? workspaceMatch[1].trim() : process.cwd();
 
-const heartbeatMatch = systemBlock.match(/Heartbeat prompt: (.*)/);
-const heartbeatPrompt = heartbeatMatch ? heartbeatMatch[1].trim() : 'ping';
-
-let heartbeatContent = '';
-const heartbeatContextMatch = systemBlock.match(/## .*?HEARTBEAT\.md\n\n([\s\S]*?)(?=\n## |$)/);
-if (heartbeatContextMatch) {
-    heartbeatContent = heartbeatContextMatch[1].trim();
-}
-
 // ---------------------------------------------------------------------------
 // 3. Parse command line arguments
 // ---------------------------------------------------------------------------
@@ -118,26 +109,19 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Build system prompt from template
+// 4. Build system prompt
 // ---------------------------------------------------------------------------
 
-const templatePath = path.join(__dirname, 'adapter-template.md');
-let systemMdContent = '';
-try {
-    if (fs.existsSync(templatePath)) {
-        const tmpl = fs.readFileSync(templatePath, 'utf-8');
-        systemMdContent = tmpl
-            .replace(/\{\{PROVIDED_SYSTEM_PROMPT\}\}/g, providedSystemPrompt
-                ? `## OpenClaw Dynamic Context\n\n${providedSystemPrompt}\n` : '')
-            .replace(/\{\{WORKSPACE\}\}/g, workspace)
-            .replace(/\{\{HEARTBEAT_PROMPT\}\}/g, heartbeatPrompt)
-            .replace(/\{\{HEARTBEAT_CONTENT\}\}/g, heartbeatContent || 'No HEARTBEAT.md found or it is empty.')
-            .replace(/\{\{CURRENT_TIME\}\}/g, new Date().toLocaleString() + ' (Local)');
+// OpenClaw already provides a fully formed system prompt inside <system>...</system>.
+// We use it directly as the Gemini CLI system prompt.
+let systemMdContent = systemBlock || '';
+
+if (!systemMdContent) {
+    if (providedSystemPrompt) {
+        systemMdContent = `## OpenClaw Dynamic Context\n\n${providedSystemPrompt}\n`;
     } else {
-        systemMdContent = `# OpenClaw Gemini Gateway\n\nWarning: adapter-template.md not found. Running with no system prompt.`;
+        systemMdContent = `# OpenClaw Gemini Gateway\n\nRunning with no system prompt.`;
     }
-} catch (e) {
-    returnError('Failed to load adapter-template.md', e);
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +241,8 @@ const GEMINI_TIMEOUT_MS = 120_000; // 2 minutes
 
 const baseGeminiArgs = [
     '--yolo',
-    '-o', 'json',
+    '-p', '',
+    '-o', 'stream-json',
     '--allowed-mcp-server-names', 'openclaw-tools',
 ];
 
@@ -276,99 +261,125 @@ const env = {
 };
 
 /**
- * Run Gemini CLI synchronously.
- * Returns { stdout, stderr, status } on success, or { error } on failure.
+ * Run Gemini CLI using async streams to prevent timeouts and provide real-time feedback.
  */
-function runGemini(args) {
-    const result = spawnSync(commandToRun, args, {
+function runGeminiAsync(args, sessionId) {
+    const geminiProcess = spawn(commandToRun, args, {
         env,
-        input: userMessage,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: GEMINI_TIMEOUT_MS,
+        stdio: ['pipe', 'pipe', 'pipe']
     });
 
-    if (result.error) {
-        const msg = result.error.code === 'ETIMEDOUT'
-            ? `Gemini CLI timed out after ${GEMINI_TIMEOUT_MS / 1000}s (no-output watchdog or network hang)`
-            : `Gemini CLI failed to start: ${result.error.message}`;
-        return { error: msg };
+    // Write the prompt to stdin and close it to signal EOF
+    if (userMessage) {
+        geminiProcess.stdin.write(userMessage);
     }
+    geminiProcess.stdin.end();
 
-    if (result.status !== 0) {
-        const stderr = (result.stderr || '').trim();
-        return {
-            error: `Gemini CLI exited with code ${result.status}${stderr ? ': ' + stderr.substring(0, 500) : ''}`,
-        };
-    }
+    let currentSessionId = sessionId;
+    let buffer = '';
 
-    return { stdout: result.stdout || '', stderr: result.stderr || '' };
+    geminiProcess.stdout.on('data', (chunk) => {
+        buffer += chunk.toString('utf-8');
+        
+        let boundary = buffer.indexOf('\n');
+        while (boundary !== -1) {
+            const line = buffer.substring(0, boundary).trim();
+            buffer = buffer.substring(boundary + 1);
+            boundary = buffer.indexOf('\n');
+
+            if (!line) continue;
+
+            try {
+                const json = JSON.parse(line);
+                
+                switch (json.type) {
+                    case 'init':
+                        if (json.session_id) currentSessionId = json.session_id;
+                        break;
+                    
+                    case 'stream':
+                    case 'message':
+                        // Only output assistant's text deltas (or raw stream)
+                        if ((json.type === 'stream' || (json.role === 'assistant' && json.delta)) && json.content) {
+                            process.stdout.write(json.content);
+                        }
+                        break;
+                        
+                    case 'tool_use':
+                        // Provide UX feedback to the OpenClaw user that a tool is running
+                        const toolName = json.tool_name || json.name || 'unknown';
+                        process.stdout.write(`\n\n🔧 [Gemini Runner: Executing ${toolName}...]\n`);
+                        break;
+                        
+                    case 'result':
+                        if (json.session_id) currentSessionId = json.session_id;
+                        break;
+                        
+                    case 'error':
+                        process.stdout.write(`\n⚠️ Gemini Backend Error: ${json.message || JSON.stringify(json)}\n`);
+                        break;
+                        
+                    case 'raw':
+                        if (json.content) process.stdout.write(json.content);
+                        break;
+                }
+            } catch (e) {
+                // Not JSON? Might be a raw warning or error from the CLI tool itself
+                process.stdout.write(line + '\n');
+            }
+        }
+    });
+
+    let stderrBuffer = '';
+    geminiProcess.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString('utf-8');
+    });
+
+    geminiProcess.on('close', (code) => {
+        // Retry logic: If this was a --resume request and it failed, clear cache and retry fresh
+        if (code !== 0 && sessionId) {
+            console.error(`[adapter] --resume failed (code ${code}). Clearing stale session and retrying...`);
+            delete sessionMap[openclawSessionId];
+            try { fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8'); } catch (_) {}
+            
+            // Clean up temporary system prompt file for the retry
+            try { fs.rmSync(tempSystemMdPath); } catch (_) {}
+            
+            // Re-run fresh (Warning: this might leave a dangling temp file if retry process exits abruptly, but acceptable for this edge case)
+            const freshArgs = [...baseGeminiArgs];
+            for (const mediaPath of mediaPaths) { freshArgs.push(`@${mediaPath}`); }
+            
+            return runGeminiAsync(freshArgs, null);
+        }
+
+        // Save the latest valid session ID for the next run
+        if (currentSessionId && currentSessionId !== geminiSessionId) {
+            sessionMap[openclawSessionId] = currentSessionId;
+            try {
+                fs.mkdirSync(path.dirname(mapFilePath), { recursive: true });
+                fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8');
+            } catch (_) {}
+        }
+        
+        // Clean up temporary system prompt file
+        try { fs.rmSync(tempSystemMdPath); } catch (_) {}
+        
+        // If there was stderr output and non-zero exit, display it
+        if (code !== 0 && stderrBuffer.trim()) {
+            process.stdout.write(`\n⚠️ Gemini CLI exited with code ${code}: ${stderrBuffer.trim().substring(0, 500)}`);
+        }
+        
+        process.exit(code);
+    });
+
+    geminiProcess.on('error', (err) => {
+        process.stdout.write(`⚠️ Gemini CLI failed to start: ${err.message}`);
+        try { fs.rmSync(tempSystemMdPath); } catch (_) {}
+        process.exit(1);
+    });
 }
 
 // ---------------------------------------------------------------------------
-// 9. Execute (with automatic --resume fallback)
+// 9. Execute Async Stream
 // ---------------------------------------------------------------------------
-
-let runResult = runGemini(geminiArgs);
-
-// If --resume failed, clear stale mapping and retry as a fresh session
-if (runResult.error && geminiSessionId) {
-    console.error(`[adapter] --resume failed (${runResult.error}). Clearing stale session and retrying...`);
-    delete sessionMap[openclawSessionId];
-    try { fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8'); } catch (_) {}
-    runResult = runGemini(baseGeminiArgs);
-}
-
-// Clean up temporary system prompt file
-try { fs.rmSync(tempSystemMdPath); } catch (_) {}
-
-// ---------------------------------------------------------------------------
-// 10. Process output → return to OpenClaw
-// ---------------------------------------------------------------------------
-
-if (runResult.error) {
-    // Always return something so OpenClaw doesn't hang silently
-    process.stdout.write(`⚠️ Gemini Backend Error: ${runResult.error}`);
-    process.exit(0);
-}
-
-const rawOutput = (runResult.stdout || '').trim();
-
-if (!rawOutput) {
-    process.stdout.write('⚠️ Gemini Backend: Gemini CLI returned no output.');
-    process.exit(0);
-}
-
-// Try to parse as JSON (Gemini CLI -o json format)
-const jsonStart = rawOutput.indexOf('{');
-if (jsonStart < 0) {
-    // Not JSON — return as-is (plain text mode)
-    process.stdout.write(rawOutput);
-    process.exit(0);
-}
-
-try {
-    const outputData = JSON.parse(rawOutput.substring(jsonStart));
-
-    // Extract response text
-    const responseText = outputData.response || outputData.responseText;
-    if (responseText) {
-        process.stdout.write(responseText);
-    } else {
-        // Unexpected JSON shape — return raw so we can see what it is
-        process.stdout.write(rawOutput);
-    }
-
-    // Persist new Gemini session ID for future --resume
-    const newSessionId = outputData.session_id || outputData.sessionId;
-    if (newSessionId && newSessionId !== geminiSessionId) {
-        sessionMap[openclawSessionId] = newSessionId;
-        try {
-            fs.mkdirSync(path.dirname(mapFilePath), { recursive: true });
-            fs.writeFileSync(mapFilePath, JSON.stringify(sessionMap, null, 2), 'utf-8');
-        } catch (_) {}
-    }
-} catch (_) {
-    // JSON parse failed — return raw output as text
-    process.stdout.write(rawOutput);
-}
+runGeminiAsync(geminiArgs, geminiSessionId);
