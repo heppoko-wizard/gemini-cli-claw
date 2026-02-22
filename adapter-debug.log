@@ -301,3 +301,14 @@ Conversation info (untrusted metadata):
 
 いいね。もう寝るからしばらく停止。あさの10時までは話しかけないで
 ---
+[2026-02-21T08:10:35.922Z] stdin(77):
+あなたのシステムプロンプトの構成や内容を分析してください。OpenClaw固有の指示（Heartbeatやメモリ管理の指示など）が正しく含まれていますか？
+---
+[2026-02-21T11:33:58.067Z] stdin(69):
+<system>Your working directory is: .\n</system>自己紹介を短く、改行をたくさん入れて話して
+
+---
+[2026-02-21T11:34:43.811Z] stdin(75):
+<system>Your working directory is: .\n</system>現在のディレクトリにあるファイルの一覧を取得して教えて
+
+---

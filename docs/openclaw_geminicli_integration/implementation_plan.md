@@ -1,148 +1,89 @@
-# OpenClaw × Gemini CLI 疎結合アダプタ 実装計画 v3（最終版）
+# 実装計画: Gemini CLIをStreamFnとして組み込む
 
-## 概要
-OpenClawの推論エンジンとしてGemini CLIを非破壊的に接続するアダプタ。
-OpenClawは外部CLI（`cliBackends`）を呼び出す際、OpenClaw固有の指示やツール一覧を含むシステムプロンプトをテキストとして同時に渡す仕様がある（`<system>`タグでラップされる）。
-これをGemini CLIがそのまま受け取ると「存在しないOpenClawツールを使え」という指示と衝突し混乱する。
+## 背景と目的
+現在のアーキテクチャ（`runCliAgent`経由）の根本問題：OpenClaw側の履歴剪定（`limitHistoryTurns`、`sanitizeSessionHistory`）が**Gemini CLIには一切届かない**。
 
-そのため、中間に **「プロンプト翻訳層（中継Nodeスクリプト）」** を挟む。
-この中継スクリプトはOpenClawからの入力をパースして有用な情報（ワークスペースパス、HEARTBEAT.mdの中身など）だけを抽出し、Gemini CLI専用のクリーンなシステムプロンプト（`GEMINI_SYSTEM_MD`）を動的生成してGemini CLIを呼び出す。
+解決策：Ollamaがやっているのとまったくおなじパターンを踏み、**Gemini CLIを`agent.streamFn`として実装**する。これにより`runEmbeddedPiAgent`の全前処理パイプラインが無償で使える。
 
-## アーキテクチャ概要
+> [!IMPORTANT]
+> これは `adapter.js` の廃止ではない。`adapter.js` は「OpenClawのstdinをGemini CLIのpromptに変換する橋」だったが、今後は**「剪定済みのmessages配列をGemini CLIに渡してその結果をstreamFnのインターフェースで返す橋」**に役割が変わる。
 
-```mermaid
-graph TD
-  OpenClaw["OpenClaw (Gateway層)"]
-  Adapter["Adapter Script (中継層)"]
-  GeminiCLI["Gemini CLI (実行層)"]
-  Workspace["ローカルファイル<br/>(HEARTBEAT.md等)"]
+## 変更内容
 
-  OpenClaw -->|コマンド起動 + 標準入力(生のプロンプト)| Adapter
-  Adapter -->|1. パース \u0026 抽出| Adapter
-  Adapter -->|2. GEMINI_SYSTEM_MD 動的生成| GeminiCLI
-  Adapter -->|3. geminiコマンド起動<br/>(ユーザー本文のみ渡す)| GeminiCLI
-  GeminiCLI <-->|ネイティブツールで読み書き| Workspace
-  GeminiCLI -->|標準出力(最終テキスト)| Adapter
-  Adapter -->|標準出力| OpenClaw
+### openclaw本体への設定変更が必要
+
+#### `openclaw.json` のバックエンド登録を変更
+```diff
+- "provider": "cli",
+- "command": "node",
+- "args": ["adapter.js"],
++ "provider": "gemini-cli",
++ "api": "gemini-cli",
 ```
+Ollamaと同様に、`api` フィールドで独自のstreamFnを呼び出すよう登録する。
 
 ---
 
-## 独自アダプタ（翻訳層）の役割と処理フロー
+### gemini-cli-claw 側の変更
 
-アダプタ本体は `gemini-openclaw-adapter.js` (Nodeスクリプト) として実装する。
+#### [MODIFY] [adapter.js](file:///home/heppo/ドキュメント/DEV/openclaw/gemini-cli-claw/adapter.js) → **廃止または役割変更**
 
-### 1. 入力パース
-OpenClawは標準入力に以下のようなフォーマットでデータを渡す。
-```markdown
-<system>
-You are a personal assistant running inside OpenClaw.
-...
-Your working directory is: /path/to/workspace
-Heartbeat prompt: ping
-...
-## /path/to/workspace/HEARTBEAT.md
-- check emails
-</system>
+現在の `adapter.js` が担っていた「Gemini CLIをspawn」する処理は、新しい `gemini-cli-stream.js`（StreamFn）に移管する。
 
-ping  <-- ユーザーメッセージ(Heartbeat)
-```
+#### [NEW] `gemini-cli-stream.js`
+`createOllamaStreamFn` と同じシグネチャの `createGeminiCliStreamFn` を実装する。
 
-**アダプタの処理:**
-- `<system>...</system>` ブロックを抽出して削除
-- ワークスペースパス（`Your working directory is: (.*)`）の抽出
-- HEARTBEAT.md の中身の抽出
-- `ping` のようなユーザーメッセージ（コマンド本文）の分離
-
-### 2. Gemini CLI用システムプロンプトの動的生成
-抽出した情報を元に、Gemini CLIが自身のツールとスキルで動けるような `system.md` を動的に生成する。
-
-```markdown
-# OpenClaw Gemini Gateway
-
-あなたのワークスペースは `${Workspace}` です。
-あなたはOpenClawのバックエンドとして動作しています。
-
-## スキルとツール
-\${AgentSkills}
-以下のツールが利用可能です： \${AvailableTools}
-
-## Heartbeat処理
-現在Heartbeatによって起床しました。
-以下の `HEARTBEAT.md` の内容を確認し、タスクがあれば実行してください。
-完了したら結果を報告し、HEARTBEAT.md を更新してください。
-タスクが何もない場合は、完了報告として `HEARTBEAT_OK` という文字列だけを返してください。
-
-### HEARTBEAT.md
-${HeartbeatContent}
-```
-
-### 3. Gemini CLIの起動と返却
-- 生成した一時ファイルを `GEMINI_SYSTEM_MD` 環境変数にセット
-- `gemini --resume <セッションID> --yolo` を起動し、分離した「ユーザー本文」だけを渡す
-- Gemini CLIの標準出力を受け取り、そのままOpenClawに返す
-
----
-
-## 実装ステップ
-
-### ステップ1: OpenClawの `cliBackends` にアダプタを登録
-`.openclaw/config.json` に中継スクリプトを登録。
-```json
-"cliBackends": {
-  "gemini-adapter": {
-    "command": "node",
-    "args": ["~/GoogleDrive_Sync/ai_tools/gemini-autocore/adapter.js", "{sessionId}"],
-    "input": "stdin",
-    "output": "text",
-    "sessionMode": "always"
-  }
+```javascript
+// StreamFn シグネチャ: (model, context, options) => AssistantMessageEventStream
+export function createGeminiCliStreamFn(workspaceDir) {
+  return (model, context, options) => {
+    const stream = createAssistantMessageEventStream();
+    
+    const run = async () => {
+      // 1. context.messages（剪定済み！）をGemini CLI形式に変換
+      const historyJson = convertMessagesToGeminiHistory(context.messages);
+      
+      // 2. 変換した履歴からGemini CLI用の一時session-xxx.jsonを書き出す
+      const sessionFile = await writeGeminiSessionFile(historyJson);
+      
+      // 3. Gemini CLIを --resume <sessionFile> で spawn（最新の1メッセージのみをプロンプトとして渡す）
+      const lastUserMessage = extractLastUserMessage(context.messages);
+      const geminiProcess = spawn('gemini', ['-p', lastUserMessage, '--resume', sessionFile, '-o', 'stream-json']);
+      
+      // 4. JSONL出力をパースしてAssistantMessageEventStreamに流し込む
+      for await (const event of parseGeminiJsonlStream(geminiProcess.stdout)) {
+        if (event.type === 'message' && event.delta) {
+          stream.push({ type: 'text', text: event.content });
+        }
+        if (event.type === 'result') {
+          stream.push({ type: 'done', reason: 'stop', message: buildAssistantMessage(event) });
+        }
+      }
+    };
+    
+    queueMicrotask(() => void run());
+    return stream;
+  };
 }
 ```
 
-### ステップ2: アダプタスクリプトの実装 (`adapter.js`)
-- Node.jsで標準入力をバッファリングして読み込む
-- 正規表現でOpenClawの `<system>` をパース
-- `fs.writeFileSync` で動的 `system.md` を出力
-- `child_process.spawn` で `gemini` コマンドを実行し、パイプで繋ぐ
+#### [NEW] OpenClawプラグイン設定 or `openclawrc` のパッチ
+OpenClawの `attempt.ts` を**変更せず**に `gemini-cli` という `api` 識別子を認識させるには、現実的には以下の2案がある：
 
-### ステップ3: コンテキスト剪定（Pruning）の同期
-（前回の議論の通り、別途監視スクリプトでOpenClaw側のログ剪定をGemini CLIのセッションファイルに反映する仕組みも実装する）
+**案A（OpenClaw本体を微修正）**: `attempt.ts` に `else if (params.model.api === "gemini-cli")` 分岐を追加。
+```typescript
+} else if (params.model.api === "gemini-cli") {
+    const { createGeminiCliStreamFn } = await import("../../gemini-cli-stream.js");
+    activeSession.agent.streamFn = createGeminiCliStreamFn(resolvedWorkspace);
+}
+```
 
----
-これにて、「OpenClawのコード改変なし」「Gemini CLIのコード改変なし」「ツールとコンテキストの混乱なし」という**完璧な疎結合アーキテクチャ**が完成する。
+**案B（MCPツール化せず、プロキシAPIサーバーとして動かす）**: `adapter.js` をHTTPサーバー（OpenAI互換エンドポイント）として改造し、Gemini CLIを裏で呼び出す。この場合は `openclaw.json` に `baseUrl: "http://localhost:3999"` で登録できる。
 
----
+> [!NOTE]
+> **案Bが最もOpenClaw本体に無侵襲**。`adapter.js` を `/v1/chat/completions` エンドポイントを持つサーバーとして実装し、OpenAI互換プロトコルで受け取ったmessages配列をGemini CLIに転送するだけで済む。MCPサーバー（`mcp-server.mjs`）はそのまま流用できる。
 
-## フェーズ5: 動的MCPサーバー自動生成アダプターの実装 (Dynamic MCP Server)
-
-OpenClawは外部CLIに対して自身のツールを無効化（`tools: []`）して渡しています。しかし、Gemini CLI側からもOpenClaw固有の高度なツール（エージェント連携、Slack/Discord通知、Cron等）を利用できるようにするため、MCP (Model Context Protocol) サーバーとして機能するアダプターを構築します。
-
-### アーキテクチャ設計
-1. **ツールの動的インポート:** 
-   `adapter.js` から OpenClaw内部の `createOpenClawCodingTools` などを呼び出し、現在ロードされている `AgentTool` インターフェースのツール群を動的に取得します。
-2. **MCPサーバーの動的生成:**
-   `@modelcontextprotocol/sdk` を利用し、取得したツール群の情報を元にMCPサーバーの `ListToolsRequest` に対して動的に応答する仕組みを作ります。これにより、手動でのハードコードをゼロにし、今後のOpenClawのアップデートにも自動追従します。
-3. **リクエストマッピング:**
-   MCPの `CallToolRequest` が飛んできた場合、ツール名で元の `AgentTool` を引き当て、その `execute(params)` メソッドにディスパッチします。
-4. **子プロセス構成:**
-   標準入出力（stdio）はすでにGemini CLIとOpenClaw本体との対話に使われているため、MCP通信用には別途 `mcp-server.js` などのスクリプトをデーモンとして立ち上げるか、あるいはGemini CLIから子プロセスとして起動させる形式とします。
-
-### 実装ステップ
-- **ステップ1**: `@modelcontextprotocol/sdk` のインストールと基盤準備
-- **ステップ2**: `mcp-server.js`（独立したMCPサーバ起動スクリプト）の実装
-- **ステップ3**: `adapter.js` 側での `--mcp-config` コマンドライン引数の動的生成とGemini CLIへの受け渡し
-- **ステップ4**: OpenClawのツールをGemini経由で呼び出すエンドツーエンド検証
-
----
-
-## フェーズ6: アダプタの最適化 (冗長なテンプレートの廃止)
-
-### 概要
-OpenClawの `cli-runner.ts` が、コンテキストに応じて必要なシステムプロンプト（ペルソナ、ツールの使い方、Heartbeatの指示など全て）を完璧なMarkdown形式として動的に構築し、`<system>`タグで渡す仕様であることが判明した。
-そのため、中間層である `adapter.js` が外部テンプレート（`adapter-template.md`）を用いてそれを再ラップしている処理が結果的に冗長になっていた。これを廃止し、アダプタのロジックをよりシンプルに最適化する。
-
-### 実装ステップ
-1. **`adapter.js` のリファクタリング:** `adapter-template.md` のファイル読み込み・プレースホルダ置換のハードコードを削除。`<system>`タグで囲まれた `systemBlock` をそのまま最終的なシステムプロンプト（`GEMINI_SYSTEM_MD`用）として書き出すように変更する。
-2. **冗長ファイルの削除:** 役割を終えた `adapter-template.md` を物理的に削除する。
-3. **検証:** 改修後の `adapter.js` 経由でGemini CLIが正常にプロンプトを受け取り、これまで通り動作することを確認する。
+## 検証計画
+1. 通常会話: 剪定済み履歴が正しくGeminiに渡り、前の文脈を参照した返答が来ること
+2. Cronタスク: `promptMode=minimal`が適用され、Geminiに渡る履歴が短く保たれること
+3. MCPツール: `mcp-server.mjs`がそのまま機能すること

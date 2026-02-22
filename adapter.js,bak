@@ -54,15 +54,10 @@ function randomId() {
 }
 
 /**
- * Write an SSE event to the response.
- * If eventType is provided, sends `event: <type>\n` before data line.
+ * Write an SSE data event to the response.
  */
-function sseWrite(res, data, eventType) {
-    if (eventType) {
-        res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
-    } else {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-    }
+function sseWrite(res, data) {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +139,8 @@ function convertToGeminiMessages(messages) {
             });
         } else if (role === 'assistant') {
             const isArray = Array.isArray(msg.content);
-            // OpenClaw uses type: "toolCall" (also "tool_use", "toolcall", "tool_call")
             const toolCallParts = isArray
-                ? msg.content.filter(p => p && (p.type === 'toolCall' || p.type === 'tool_use' || p.type === 'toolcall' || p.type === 'tool_call'))
+                ? msg.content.filter(p => p && (p.type === 'toolCall' || p.type === 'tool_use'))
                 : [];
             const textContent = extractText(msg.content);
 
@@ -157,59 +151,27 @@ function convertToGeminiMessages(messages) {
                 content: textContent,
             };
 
-            const allToolCalls = [];
-
             if (toolCallParts.length > 0) {
-                allToolCalls.push(...toolCallParts.map(tc => ({
+                geminiMsg.toolCalls = toolCallParts.map(tc => ({
                     id: tc.id || randomId(),
                     name: tc.name,
                     args: tc.arguments || tc.input || {},
                     status: 'success',
                     timestamp: now,
-                })));
-            }
-
-            if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-                allToolCalls.push(...msg.tool_calls.map(tc => {
-                    let parsedArgs = {};
-                    try {
-                        parsedArgs = typeof tc.function?.arguments === 'string' 
-                            ? JSON.parse(tc.function.arguments) 
-                            : (tc.function?.arguments || {});
-                    } catch (e) {
-                         parsedArgs = tc.function?.arguments || {};
-                    }
-                    return {
-                        id: tc.id || randomId(),
-                        name: tc.function?.name || tc.name,
-                        args: parsedArgs,
-                        status: 'success',
-                        timestamp: now,
-                    };
                 }));
-            }
-
-            if (allToolCalls.length > 0) {
-                geminiMsg.toolCalls = allToolCalls;
             }
 
             geminiMessages.push(geminiMsg);
         } else if (role === 'toolResult' || role === 'tool') {
-            // Match tool result to the correct toolCall using toolCallId/tool_call_id/toolUseId
-            const resultToolCallId = msg.tool_call_id || msg.toolCallId || msg.toolUseId || msg.tool_use_id || '';
-            const toolName = msg.toolName || msg.name || '';
-            const result = extractText(msg.content);
-
             const lastGemini = [...geminiMessages].reverse().find(m => m.type === 'gemini');
             if (lastGemini && lastGemini.toolCalls) {
-                // Prefer matching by toolCallId, fallback to name
+                const toolName = msg.toolName || '';
+                const result = extractText(msg.content);
                 const matchingCall = lastGemini.toolCalls.find(
-                    tc => (resultToolCallId && tc.id === resultToolCallId) ||
-                          (toolName && tc.name === toolName) ||
-                          (!resultToolCallId && !toolName)
+                    tc => tc.name === toolName || !toolName
                 );
                 if (matchingCall) {
-                    matchingCall.result = [{ functionResponse: { name: matchingCall.name, response: { output: result } } }];
+                    matchingCall.result = [{ functionResponse: { name: toolName, response: { output: result } } }];
                 }
             }
         }
@@ -262,191 +224,6 @@ function overwriteSessionHistory(chatsDir, sessionId, newMessages) {
         log(`Failed to overwrite session file: ${e.message}`);
         return null;
     }
-}
-
-// ---------------------------------------------------------------------------
-// OpenClaw session JSONL injection
-// ---------------------------------------------------------------------------
-
-/**
- * After the SSE response is complete and OpenClaw has saved the assistant message,
- * inject tool call data directly into OpenClaw's session JSONL file.
- *
- * This works around the fact that OpenClaw's SSE parser only handles text deltas
- * and cannot receive structured tool call events from external providers.
- *
- * Flow:
- *   1. Wait for OpenClaw to finish writing the assistant message to its JSONL
- *   2. Read the JSONL, find the last assistant message
- *   3. Modify it to include toolCall entries in its content array
- *   4. Append toolResult messages after it
- */
-function findOpenClawSessionFile(sessionKey) {
-    const storePath = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'sessions', 'sessions.json');
-    try {
-        const store = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
-
-        // Try common session key patterns
-        const candidates = [
-            sessionKey,
-            `agent:main:${sessionKey}`,
-            'agent:main:main',
-        ];
-
-        for (const key of candidates) {
-            const entry = store[key];
-            if (entry?.sessionFile && fs.existsSync(entry.sessionFile)) {
-                return entry.sessionFile;
-            }
-        }
-
-        // Fallback: search all entries for matching sessionKey-derived keys
-        for (const [key, entry] of Object.entries(store)) {
-            if (key.includes(sessionKey) && entry?.sessionFile && fs.existsSync(entry.sessionFile)) {
-                return entry.sessionFile;
-            }
-        }
-    } catch (e) {
-        log(`Failed to find OpenClaw session file: ${e.message}`);
-    }
-    return null;
-}
-
-/**
- * Poll until the JSONL file contains our assistant response text, then inject tools.
- */
-function injectToolHistoryIntoOpenClaw(sessionKey, collectedTools, assistantText) {
-    if (!collectedTools || collectedTools.length === 0) return;
-
-    const sessionFile = findOpenClawSessionFile(sessionKey);
-    if (!sessionFile) {
-        log(`[inject] Cannot find OpenClaw session file for key: ${sessionKey}`);
-        return;
-    }
-
-    // Snippet to match - first 60 chars of the assistant response
-    const matchSnippet = (assistantText || '').trim().substring(0, 60);
-    if (!matchSnippet) {
-        log('[inject] No assistant text to match against, skipping injection');
-        return;
-    }
-
-    let attempt = 0;
-    const maxAttempts = 15;  // 15 attempts × 1s = 15s max wait
-    const pollInterval = 1000;
-
-    const poll = () => {
-        attempt++;
-        try {
-            const lines = fs.readFileSync(sessionFile, 'utf-8').split('\n').filter(Boolean);
-
-            // Find the last assistant message that contains our text snippet
-            let targetLineIndex = -1;
-            for (let i = lines.length - 1; i >= 0; i--) {
-                try {
-                    const entry = JSON.parse(lines[i]);
-                    const msg = entry.message || entry;
-                    if (msg.role === 'assistant') {
-                        const msgText = extractTextFromContent(msg.content);
-                        if (msgText.includes(matchSnippet)) {
-                            targetLineIndex = i;
-                            break;
-                        }
-                    }
-                } catch (_) {}
-            }
-
-            if (targetLineIndex === -1) {
-                if (attempt < maxAttempts) {
-                    setTimeout(poll, pollInterval);
-                } else {
-                    log(`[inject] Gave up waiting for OpenClaw to save after ${maxAttempts} attempts`);
-                }
-                return;
-            }
-
-            log(`[inject] Found assistant message at line ${targetLineIndex + 1} (attempt ${attempt})`);
-
-            // Group tool calls and their results
-            const toolUses = collectedTools.filter(t => t.type === 'use');
-            const toolResults = collectedTools.filter(t => t.type === 'result');
-
-            if (toolUses.length === 0) {
-                log('[inject] No tool_use events to inject');
-                return;
-            }
-
-            // Modify the assistant message to include toolCalls array
-            const entry = JSON.parse(lines[targetLineIndex]);
-            const msg = entry.message || entry;
-
-            if (!msg.toolCalls) {
-                msg.toolCalls = [];
-            }
-
-            for (const tc of toolUses) {
-                const toolCallObj = {
-                    id: tc.id,
-                    name: tc.name,
-                    args: tc.args,
-                    status: 'success',
-                    timestamp: new Date().toISOString(),
-                };
-
-                // Find if there's a matching result for this tool call
-                const matchingResult = toolResults.find(r => r.toolId === tc.id);
-                if (matchingResult) {
-                    if (matchingResult.status === 'error') {
-                        toolCallObj.status = 'error';
-                    }
-                    toolCallObj.result = [
-                        {
-                            functionResponse: {
-                                id: tc.id,
-                                name: tc.name,
-                                response: {
-                                    output: typeof matchingResult.output === 'string' ? matchingResult.output : JSON.stringify(matchingResult.output)
-                                }
-                            }
-                        }
-                    ];
-                }
-
-                msg.toolCalls.push(toolCallObj);
-            }
-
-            lines[targetLineIndex] = JSON.stringify(entry);
-
-            // OpenClaw format doesn't natively use separate toolResult messages in the JSONL;
-            // it embeds the result inside the assistant's toolCalls array as seen in samplesession.json.
-            // So we only need to update the target line, no new lines appended.
-
-            fs.writeFileSync(sessionFile, lines.join('\n') + '\n', 'utf-8');
-            log(`[inject] Successfully injected ${toolUses.length} toolCall(s) info directly into assistant message in ${path.basename(sessionFile)}`);
-
-        } catch (e) {
-            log(`[inject] Error during injection (attempt ${attempt}): ${e.message}`);
-            if (attempt < maxAttempts) {
-                setTimeout(poll, pollInterval);
-            }
-        }
-    };
-
-    // Start polling after initial delay
-    setTimeout(poll, 2000);
-}
-
-/** Extract text from various content formats */
-function extractTextFromContent(content) {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-        return content.map(p => {
-            if (typeof p === 'string') return p;
-            if (p && typeof p === 'object') return p.text || '';
-            return '';
-        }).join(' ');
-    }
-    return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +297,7 @@ function prepareGeminiEnv({ sessionKey, workspaceDir, systemPrompt }) {
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks.
  */
-function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
+function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, requestId, onSessionId }) {
     const args = ['--yolo', '--allowed-mcp-server-names', 'openclaw-tools', '-o', 'stream-json'];
 
     if (sessionName) {
@@ -544,24 +321,6 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
 
     let buffer = '';
     let fullText = '';
-    let sequenceNumber = 0;
-    const collectedTools = [];  // Collect tool_use / tool_result for post-response injection
-    const responseId = `resp_${requestId}`;
-    let outputIndex = 0;
-    let contentIndex = 0;
-
-    // Send initial completions chunk
-    sseWrite(res, {
-        id: responseId,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: 'gemini',
-        choices: [{
-            index: 0,
-            delta: { role: 'assistant', content: '' },
-            finish_reason: null
-        }]
-    });
 
     geminiProcess.stdout.on('data', chunk => {
         const raw = chunk.toString('utf-8');
@@ -598,15 +357,9 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
                     if (json.content) {
                         fullText += json.content;
                         sseWrite(res, {
-                            id: responseId,
+                            id: `chatcmpl-${requestId}`,
                             object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: json.content },
-                                finish_reason: null
-                            }]
+                            choices: [{ index: 0, delta: { content: json.content }, finish_reason: null }],
                         });
                     }
                     break;
@@ -615,51 +368,30 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
                     if (json.role === 'assistant' && json.content) {
                         fullText += json.content;
                         sseWrite(res, {
-                            id: responseId,
+                            id: `chatcmpl-${requestId}`,
                             object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: json.content },
-                                finish_reason: null
-                            }]
+                            choices: [{ index: 0, delta: { content: json.content }, finish_reason: null }],
                         });
                     }
                     break;
 
                 case 'tool_use': {
                     const toolName = json.tool_name || json.name || 'unknown';
-                    const toolId = json.tool_id || json.id || `call_${randomId()}`;
-                    const toolArgs = json.parameters || json.args || json.input || {};
-                    log(`[tool_use] ${toolName} (id=${toolId})`);
-                    // Collect for post-response injection into OpenClaw session
-                    collectedTools.push({ type: 'use', id: toolId, name: toolName, args: toolArgs });
-                    break;
-                }
-
-                case 'tool_result': {
-                    const resultToolId = json.tool_id || json.id || '';
-                    const resultOutput = json.output || json.content || '';
-                    const resultStatus = json.status || 'success';
-                    const resultToolName = json.tool_name || json.name || '';
-                    log(`[tool_result] id=${resultToolId} status=${resultStatus}`);
-                    // Collect for post-response injection
-                    collectedTools.push({ type: 'result', toolId: resultToolId, output: resultOutput, status: resultStatus, toolName: resultToolName });
+                    const notice = `\n\n🔧 [Gemini: executing ${toolName}...]\n`;
+                    fullText += notice;
+                    sseWrite(res, {
+                        id: `chatcmpl-${requestId}`,
+                        object: 'chat.completion.chunk',
+                        choices: [{ index: 0, delta: { content: notice }, finish_reason: null }],
+                    });
                     break;
                 }
 
                 case 'error':
                     sseWrite(res, {
-                        id: responseId,
+                        id: `chatcmpl-${requestId}`,
                         object: 'chat.completion.chunk',
-                        created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
-                        choices: [{
-                            index: 0,
-                            delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` },
-                            finish_reason: null
-                        }]
+                        choices: [{ index: 0, delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` }, finish_reason: null }],
                     });
                     break;
             }
@@ -675,41 +407,22 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
             log(`Gemini CLI stderr: ${stderr.trim().substring(0, 300)}`);
         }
 
-        // Send completion chunk
+        // Send the stop chunk
         sseWrite(res, {
-            id: responseId,
+            id: `chatcmpl-${requestId}`,
             object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{
-                index: 0,
-                delta: {},
-                finish_reason: 'stop'
-            }]
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
         });
         res.write('data: [DONE]\n\n');
-
         res.end();
-
-        // After SSE is complete, inject tool history into OpenClaw's session file
-        // Wait for OpenClaw to finish saving the assistant message first
-        if (collectedTools.length > 0) {
-            injectToolHistoryIntoOpenClaw(sessionKey, collectedTools, fullText);
-        }
     });
 
     geminiProcess.on('error', err => {
         log(`Gemini CLI failed to start: ${err.message}`);
         sseWrite(res, {
-            id: responseId,
+            id: `chatcmpl-${requestId}`,
             object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{
-                index: 0,
-                delta: { content: `\n⚠️ Gemini CLI failed to start: ${err.message}` },
-                finish_reason: 'error'
-            }]
+            choices: [{ index: 0, delta: { content: `⚠️ Gemini CLI failed to start: ${err.message}` }, finish_reason: 'stop' }],
         });
         res.write('data: [DONE]\n\n');
         res.end();
@@ -720,15 +433,9 @@ function runGeminiStreaming({ prompt, sessionName, mediaPaths, env, res, request
         log('Gemini CLI timed out — killing process');
         geminiProcess.kill('SIGTERM');
         sseWrite(res, {
-            id: responseId,
+            id: `chatcmpl-${requestId}`,
             object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{
-                index: 0,
-                delta: { content: '\n⚠️ Gemini CLI timed out.' },
-                finish_reason: 'length'
-            }]
+            choices: [{ index: 0, delta: { content: '\n⚠️ Gemini CLI timed out.' }, finish_reason: 'stop' }],
         });
         res.write('data: [DONE]\n\n');
         res.end();
@@ -872,7 +579,6 @@ const server = http.createServer(async (req, res) => {
                     saveSessionMap(map);
                     log(`captured session_id: ${capturedId} for key: ${sessionKey}`);
                 },
-                sessionKey,
             });
 
             // Cleanup temp system prompt file when connection closes
@@ -916,7 +622,6 @@ const server = http.createServer(async (req, res) => {
                     map[sessionKey] = capturedId;
                     saveSessionMap(map);
                 },
-                sessionKey,
             });
         }
         return;

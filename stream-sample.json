@@ -1,0 +1,14 @@
+{"type":"init","timestamp":"2026-02-21T11:19:32.836Z","session_id":"e00b1242-073f-4712-b253-17b188f93640","model":"auto-gemini-3"}
+{"type":"message","timestamp":"2026-02-21T11:19:32.837Z","role":"user","content":"今日の日付を取得して、その後、現在のディレクトリのファイル一覧を取得し、最後にそれらをまとめて自己紹介してください\n"}
+{"type":"message","timestamp":"2026-02-21T11:19:37.224Z","role":"assistant","content":"今日の日付を取得し、現在のディレクトリを確認した上で、自己紹介をさせていただきます。","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:37.350Z","role":"assistant","content":"\n\nまず、今日の日付を確認します。次に、現在のディレクトリにあるファイルの一","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:37.384Z","role":"assistant","content":"覧を取得します。最後に、これらの情報を交えて自己紹介を行います。\n\n","delta":true}
+{"type":"tool_use","timestamp":"2026-02-21T11:19:37.929Z","tool_name":"run_shell_command","tool_id":"run_shell_command_1771672777929_0","parameters":{"command":"date && ls -F","description":"今日の日付と現在のディレクトリのファイル一覧を取得します。"}}
+{"type":"tool_result","timestamp":"2026-02-21T11:19:38.008Z","tool_id":"run_shell_command_1771672777929_0","status":"success","output":"2026年  2月 21日 土曜日 20:19:37 JST\nKNOWN_ISSUES.md        README_ZH.md       install.bat        package.json\nLICENSE                adapter-debug.log  install.sh*        setup.js\nPROMOTION_DRAFT_JA.md  adapter.js*        mcp-server.mjs     stream-sample.json\nREADME.md              docs/              node_modules/      test-import.mjs\nREADME_EN.md           inspect-tools.mjs  package-lock.json"}
+{"type":"message","timestamp":"2026-02-21T11:19:40.130Z","role":"assistant","content":"2026年2月21日土曜日、現在の時刻は","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:40.297Z","role":"assistant","content":"20時19分です。\n\n私は Gemini CLI です。現在、`/","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:40.485Z","role":"assistant","content":"home/heppo/ドキュメント/DEV/openclaw/gemini-cli-claw` というディレクトリで活動しており、この場所には `adapter.","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:40.818Z","role":"assistant","content":"js`、`mcp-server.mjs`、そしてプロジェクトのドキュメントが収められた `docs/` フォルダなどが存在しています","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:40.976Z","role":"assistant","content":"。\n\n私は、高度な自律性を備えたAIエンジニアとして、コードの分析から実装、テスト、そしてシステム運用まで、あなたのソフトウェア開発を強力にサポートします。この環境のツールやファイルを自在に操り、技術的な","delta":true}
+{"type":"message","timestamp":"2026-02-21T11:19:41.019Z","role":"assistant","content":"課題を迅速かつ正確に解決することが私の使命です。\n\n本日はどのようなお手伝いをいたしましょうか？","delta":true}
+{"type":"result","timestamp":"2026-02-21T11:19:41.056Z","status":"success","stats":{"total_tokens":23376,"input_tokens":22697,"output_tokens":316,"cached":9795,"input":12902,"duration_ms":8220,"tool_calls":1}}
