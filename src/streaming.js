@@ -107,8 +107,9 @@ function prepareGeminiEnv({ sessionKey, workspaceDir, systemPrompt }) {
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks.
  */
-async function runGeminiStreaming({ prompt, messages, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
-    const geminiArgs = ['--yolo', '--allowed-mcp-server-names', 'openclaw-tools', '-o', 'stream-json'];
+async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
+    const reqModel = model || 'auto-gemini-3';
+    const geminiArgs = ['--yolo', '--allowed-mcp-server-names', 'openclaw-tools', '-o', 'stream-json', '--model', reqModel];
 
     const responseId = `resp_${requestId}`;
 
@@ -179,7 +180,7 @@ async function runGeminiStreaming({ prompt, messages, sessionName, mediaPaths, e
             const response = await generateContentDirect(
                 requestId,
                 mergedContents,
-                "auto-gemini-3",
+                reqModel,
                 abortController.signal
             );
             

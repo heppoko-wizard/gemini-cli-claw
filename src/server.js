@@ -80,6 +80,7 @@ const server = http.createServer(async (req, res) => {
         const stream      = body.stream !== false;
         const sessionKey  = body._openclawSessionKey || body._sessionId || 'default';
         const workspaceDir = body._workspaceDir || process.cwd();
+        const reqModel     = body.model || 'auto-gemini-3';
 
         // Extract system prompt from the messages array
         const systemMsg = messages.find(m => m.role === 'system');
@@ -149,6 +150,7 @@ const server = http.createServer(async (req, res) => {
             runGeminiStreaming({
                 prompt: promptText,
                 messages: historyMessages.concat(messages.slice(lastUserIdx)),
+                model: reqModel,
                 sessionName: geminiSessionId,
                 mediaPaths,
                 env,
@@ -194,6 +196,7 @@ const server = http.createServer(async (req, res) => {
             runGeminiStreaming({
                 prompt: promptText,
                 messages: historyMessages.concat(messages.slice(lastUserIdx)),
+                model: reqModel,
                 sessionName: geminiSessionId,
                 mediaPaths,
                 env,
