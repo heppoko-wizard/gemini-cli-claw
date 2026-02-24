@@ -172,3 +172,31 @@
 
 ### 残った課題・TODO
 - [ ] GoogleDrive_Sync 上の `ai_tools/` や `Global_Env/home/` 以下のファイル（`.claude.json` 等）が消失しており、空ファイルで代替中。必要であれば再作成が必要。
+
+---
+
+## セッション 10: Gemini モデル動的同期・UI表示問題の解決・ログ集約
+
+### やったこと
+- **UIに全Geminiモデルが表示されない原因を特定**: `openclaw models list` が `models.json` ではなく `openclaw.json` の `agents.defaults.models` マップを参照することを突き止めた。
+- **`scripts/update_models.js` の改修**: `@google/gemini-cli-core` の `VALID_GEMINI_MODELS` から取得したモデルを `openclaw.json` の2箇所（`models.providers.gemini-adapter.models` と `agents.defaults.models`）に書き込むよう修正。これで OpenClaw が Gateway 起動時に `models.json` を自動生成するため、`models.json` への直接書き込みを廃止してシンプルにした。
+- **ログ出力の追加**: `server.js` と `runner.js` に「どのモデルが選ばれたか」を `adapter.log` に出力する処理を追加（`Selected model:`, `[Runner] Using model:`）。
+- **ログ集約**: アダプター関連の全ログファイルを `logs/` サブディレクトリに集約。`start.sh` の `LOG_FILE` / `PID_FILE` 変数と `server.js` のリクエストキャッシュ保存先を `logs/` 配下に変更。
+- **ドキュメント作成**: `docs/gemini_model_sync/` 配下に `resource_paths.md`（ログ・設定ファイルパス一覧）と `walkthrough.md`（実装概要）を新規作成。
+
+### 発見・学んだこと
+- OpenClaw の `openclaw models list` はデフォルト（`--all` なし）では `resolveConfiguredEntries()` が `agents.defaults.models` マップのキーしか列挙しない。`models.json` にモデルがあっても、ここに書かれていなければ UI に表示されない。
+- **`openclaw.json` が唯一の真実源**。同ファイルを更新すれば Gateway 起動時に `models.json` が自動再生成されるため、両方を直接書き換える必要はない。
+
+### ハマったこと・失敗
+- **現象**: `update_models.js` を実行しても `openclaw models list` で1モデルしか表示されない。
+- **原因**: `models.json` は更新されていたが、`agents.defaults.models` マップが空のままだった。
+- **対処**: `update_models.js` に `agents.defaults.models` への書き込みロジックを追加。
+
+### 変更したファイル
+- `scripts/update_models.js` — `openclaw.json` のみを更新するよう刷新（`models.json` 直接書き込みを廃止）
+- `src/server.js` — `Selected model:` ログ追加・リクエストキャッシュ保存先を `logs/` に変更
+- `src/runner.js` — `[Runner] Using model:` ログ追加
+- `start.sh` — `LOG_FILE` / `PID_FILE` を `logs/` 配下に変更、`logs/` ディレクトリ自動作成を追加
+- `docs/gemini_model_sync/resource_paths.md` — 新規作成（ログ・設定パス一覧）
+- `docs/gemini_model_sync/walkthrough.md` — 新規作成（実装概要）
