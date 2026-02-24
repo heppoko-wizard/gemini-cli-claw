@@ -141,7 +141,9 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
             input: prompt,
             promptId: requestId,
             resumedSessionData,
-            model: model
+            model: model,
+            env: env,
+            mediaPaths: mediaPaths
         });
 
         let buffer = '';
