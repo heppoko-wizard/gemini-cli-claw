@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_release:
+    name: Build and Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Package for Linux / macOS
+        run: |
+          PROJECT_NAME="openclaw-gemini-cli-adapter"
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          mkdir -p dist
+
+          # リリースに含めるファイルを選别（生成物・ログ・開発用ドキュメントは除外）
+          zip -r dist/${PROJECT_NAME}-${TAG_NAME}-linux.zip \
+            src/ scripts/ \
+            adapter.js mcp-server.mjs setup.js \
+            start.sh install.sh \
+            package.json \
+            README.md README_JA.md README_ZH.md \
+            LICENSE \
+            -x "*.log" -x "logs/*" -x "memory*" -x "*.pid"
+
+          # macOS 向けは同一内容（OS固有ビルド不要のためコピー）
+          cp dist/${PROJECT_NAME}-${TAG_NAME}-linux.zip \
+             dist/${PROJECT_NAME}-${TAG_NAME}-macos.zip
+
+      - name: Package for Windows
+        run: |
+          PROJECT_NAME="openclaw-gemini-cli-adapter"
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          zip -r dist/${PROJECT_NAME}-${TAG_NAME}-windows.zip \
+            src/ scripts/ \
+            adapter.js mcp-server.mjs setup.js \
+            install.bat \
+            package.json \
+            README.md README_JA.md README_ZH.md \
+            LICENSE \
+            -x "*.log" -x "logs/*" -x "memory*" -x "*.pid"
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
