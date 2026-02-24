@@ -38,3 +38,4 @@ OpenClawの各フロントエンド（Telegram等）から、Google公式の推�
   - セッション1 (2/13): StreamFn改造案の挫折とAPIプロキシ案の立案
   - セッション2 (2/21): Gemini記憶喪失問題とJSONLファイル手動注入（Inject）との格闘
   - セッション3 (2/21): `undefined reading '0'`（ストリーム形式不整合）解決による最終安定化
+- [backlog.md](backlog.md) | プロジェクトの未着手課題・TODO・アイデア集 | 随時更新
