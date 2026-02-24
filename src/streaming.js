@@ -3,17 +3,13 @@
 const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
 const { log, randomId, sseWrite } = require('./utils');
-const { injectToolHistoryIntoOpenClaw } = require('./injector');
 
 // ---------------------------------------------------------------------------
 // Gemini CLI discovery
 // ---------------------------------------------------------------------------
 
 const __dir = path.resolve(__dirname, '..');
-
-const GEMINI_TIMEOUT_MS = 180_000; // 3 minutes
 
 // ---------------------------------------------------------------------------
 // Per-session Gemini CLI environment setup
@@ -88,7 +84,7 @@ const { runnerPool } = require('./runner-pool.js');
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks via RunnerPool.
  */
-async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, req, res, requestId, onSessionId, sessionKey }) {
+async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
     const responseId = `resp_${requestId}`;
     const perfStart = Date.now();
     let perfFirstToken = null;

@@ -203,7 +203,6 @@ const server = http.createServer(async (req, res) => {
                 sessionName: geminiSessionId,
                 mediaPaths,
                 env,
-                req,
                 res,
                 requestId,
                 onSessionId: (capturedId) => {
@@ -264,9 +263,6 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
 });
-
-// グローバルなフォールバックフラグの定義（streaming.js等で参照する）
-global.useFallbackSpawn = false;
 
 // サーバー起動
 server.listen(PORT, () => {
