@@ -15,7 +15,7 @@ const os = require("os");
 const readline = require("readline");
 
 const SCRIPT_DIR = __dirname;
-const OPENCLAW_ROOT = path.resolve(SCRIPT_DIR, "..");
+let OPENCLAW_ROOT = path.resolve(SCRIPT_DIR, "..");
 const SERVER_JS = path.join(SCRIPT_DIR, "src", "server.js");
 const OPENCLAW_CONFIG = path.join(os.homedir(), ".openclaw", "openclaw.json");
 const GEMINI_CREDS_DIR = path.join(os.homedir(), ".gemini");
@@ -35,7 +35,7 @@ const MSG = {
         relocationTip: "すでに OpenClaw がインストールされている場合は、この '{RENAME_ME}' フォルダを OpenClaw のルートディレクトリ直下に配置してから再度実行してください。",
         placementEx: "配置例:",
         installOpenclaw: "OpenClaw がビルドされていないようです。ビルドを実行しますか？ (Y/n): ",
-        buildingOpenclaw: "OpenClaw をビルド中 (npm install && npm run build)...",
+        buildingOpenclaw: "OpenClaw をビルド中 (pnpm が必要な場合は自動インストール後にビルド)...",
         buildOpenclawFail: "エラー: OpenClaw のビルドに失敗しました。セットアップを継続できません。",
         buildOpenclawSuccess: "✓ OpenClaw のビルド完了",
         checkGeminiDep: "Gemini Backend (このフォルダ) の npm パッケージをインストール中...",
@@ -68,7 +68,7 @@ const MSG = {
         relocationTip: "If OpenClaw is already installed, please move this '{RENAME_ME}' folder directly into your OpenClaw root directory and run again.",
         placementEx: "Example:",
         installOpenclaw: "OpenClaw does not appear to be built. Build it now? (Y/n): ",
-        buildingOpenclaw: "Building OpenClaw (npm install && npm run build)...",
+        buildingOpenclaw: "Building OpenClaw (installing pnpm if needed, then npm install && pnpm build)...",
         buildOpenclawFail: "Error: OpenClaw build failed. Setup cannot continue.",
         buildOpenclawSuccess: "✓ OpenClaw build complete",
         checkGeminiDep: "Installing npm dependencies for Gemini Backend...",
@@ -101,7 +101,7 @@ const MSG = {
         relocationTip: "如果已经安装了 OpenClaw，请将此 '{RENAME_ME}' 文件夹直接移动到 OpenClaw 根目录下并重新运行。",
         placementEx: "配置示例：",
         installOpenclaw: "OpenClaw 似乎尚未构建。现在构建吗？ (Y/n): ",
-        buildingOpenclaw: "正在构建 OpenClaw (npm install && npm run build)...",
+        buildingOpenclaw: "正在构建 OpenClaw (如需将先安装 pnpm，然后执行 npm install && pnpm build)...",
         buildOpenclawFail: "错误：OpenClaw 构建失败。无法继续安装。",
         buildOpenclawSuccess: "✓ OpenClaw 构建完成",
         checkGeminiDep: "正在安装 Gemini 后端（本文件夹）的 npm 依赖包...",
@@ -134,6 +134,34 @@ const question = (query) => new Promise((resolve) => rl.question(query, resolve)
 
 function runCommand(command, cwd) {
     return spawnSync(command, { cwd, shell: true, stdio: "inherit" });
+}
+
+/**
+ * Ensure pnpm is available. If not, install it globally via npm.
+ */
+function ensurePnpm() {
+    const check = spawnSync("pnpm", ["--version"], { shell: true, stdio: "pipe" });
+    if (check.status === 0) return true; // already available
+    console.log("[pnpm] pnpm not found. Installing globally via npm...");
+    const install = spawnSync("npm", ["install", "-g", "pnpm"], { shell: true, stdio: "inherit" });
+    return install.status === 0;
+}
+
+/**
+ * Build OpenClaw. Because OpenClaw uses pnpm scripts internally,
+ * we must use pnpm for building. npm is used only for the initial
+ * dependency installation (pnpm install also works).
+ */
+function buildOpenclaw(cwd) {
+    // Install deps
+    const depRes = spawnSync("npm", ["install"], { cwd, shell: true, stdio: "inherit" });
+    if (depRes.status !== 0) return depRes;
+    // Ensure pnpm exists before running build script
+    if (!ensurePnpm()) {
+        return { status: 1 };
+    }
+    // Run build via pnpm (openclaw's package.json build script calls pnpm internally)
+    return spawnSync("npm", ["run", "build"], { cwd, shell: true, stdio: "inherit" });
 }
 
 async function main() {
@@ -214,7 +242,7 @@ async function main() {
         const buildAns = await question(L.installOpenclaw);
         if (buildAns.trim() === '' || buildAns.trim().toLowerCase() === 'y') {
             console.log(L.buildingOpenclaw);
-            const res = runCommand("npm install && npm run build", OPENCLAW_ROOT);
+            const res = buildOpenclaw(OPENCLAW_ROOT);
             if (res.status !== 0) {
                 console.error("Error: OpenClaw build failed. Setup cannot continue.");
                 process.exit(1);
