@@ -55,9 +55,27 @@ const server = http.createServer(async (req, res) => {
     // Models endpoint (OpenClaw probes this)
     if (req.method === 'GET' && (url.pathname === '/v1/models' || url.pathname === '/models')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
+        
+        let modelsList = [{ id: 'gemini', object: 'model', owned_by: 'google' }];
+        try {
+            const core = require('@google/gemini-cli-core');
+            if (core.VALID_GEMINI_MODELS) {
+                modelsList = Array.from(core.VALID_GEMINI_MODELS).map(m => ({
+                    id: m,
+                    object: 'model',
+                    owned_by: 'google'
+                }));
+                // Also add aliases
+                modelsList.push({ id: 'auto-gemini-3', object: 'model', owned_by: 'google' });
+                modelsList.push({ id: 'auto-gemini-2.5', object: 'model', owned_by: 'google' });
+            }
+        } catch (e) {
+            log(`[models] Failed to load dynamic models from core: ${e.message}`);
+        }
+
         res.end(JSON.stringify({
             object: 'list',
-            data: [{ id: 'gemini', object: 'model', owned_by: 'google' }],
+            data: modelsList,
         }));
         return;
     }
@@ -66,9 +84,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && (url.pathname === '/v1/chat/completions' || url.pathname === '/chat/completions' || url.pathname === '/responses')) {
         let body;
         try {
+            const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
             body = await readBody(req);
-            fs.writeFileSync('/tmp/adapter_last_req.json', JSON.stringify(body, null, 2), 'utf-8');
-            log(`Request body saved to /tmp/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
+            fs.writeFileSync(logPath, JSON.stringify(body, null, 2), 'utf-8');
+            log(`Request body saved to logs/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
         }
         catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -143,6 +162,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const requestId = randomId();
+        log(`Selected model: ${reqModel}`);
 
         if (stream) {
             res.writeHead(200, {

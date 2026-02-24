@@ -74,12 +74,13 @@ class RunnerPool {
     assignRunner(runner, pendingReq) {
         const { request, resolve } = pendingReq;
         // Runnerにプロンプト実行の号令をかける
-        console.log(`[Pool] Dispatching runner for session: ${request.resumedSessionData?.conversation?.sessionId || 'none'}`);
+        console.log(`[Pool] Dispatching runner for session: ${request.resumedSessionData?.conversation?.sessionId || 'none'} (model: ${request.model || 'default'})`);
         runner.send({ 
             type: 'run', 
             input: request.input, 
             prompt_id: request.promptId, 
-            resumedSessionData: request.resumedSessionData 
+            resumedSessionData: request.resumedSessionData,
+            model: request.model 
         });
         
         // 呼び出し元（Streaming層）へ、入出力ストリームを持つRunnerプロセスを返す

@@ -11,8 +11,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${GEMINI_ADAPTER_PORT:-3972}"
-LOG_FILE="${SCRIPT_DIR}/adapter.log"
-PID_FILE="${SCRIPT_DIR}/adapter.pid"
+LOG_FILE="${SCRIPT_DIR}/logs/adapter.log"
+PID_FILE="${SCRIPT_DIR}/logs/adapter.pid"
 
 # ランタイム選択: Bun優先、無ければNode.jsにフォールバック
 if command -v bun >/dev/null 2>&1; then
@@ -34,6 +34,12 @@ if [[ -f "$PID_FILE" ]]; then
         rm -f "$PID_FILE"
     fi
 fi
+
+echo "[start.sh] Syncing models to OpenClaw config..."
+$RUNTIME "$SCRIPT_DIR/scripts/update_models.js" || echo "[start.sh] Warning: Failed to sync models"
+
+# Create logs directory if it doesn't exist
+mkdir -p "$SCRIPT_DIR/logs"
 
 echo "[start.sh] Starting Gemini CLI adapter on port $PORT ..."
 nohup $RUNTIME "$SCRIPT_DIR/src/server.js" > "$LOG_FILE" 2>&1 &

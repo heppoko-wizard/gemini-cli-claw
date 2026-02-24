@@ -140,7 +140,8 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
         const runner = await runnerPool.acquireRunner({
             input: prompt,
             promptId: requestId,
-            resumedSessionData
+            resumedSessionData,
+            model: model
         });
 
         let buffer = '';

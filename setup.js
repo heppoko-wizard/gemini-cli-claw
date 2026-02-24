@@ -158,6 +158,14 @@ async function main() {
     }
     console.log(L.installDepSuccess + "\n");
 
+    // 2.5 Sync Gemini Models to OpenClaw
+    console.log("[~] Syncing Gemini models to OpenClaw...");
+    const syncRes = runCommand("node scripts/update_models.js", SCRIPT_DIR);
+    if (syncRes.status !== 0) {
+        console.error("Warning: Failed to sync Gemini models. Models might not appear in OpenClaw UI.");
+    }
+    console.log("✓ Models synced\n");
+
     // 3. Register adapter in openclaw.json
     console.log("[3/4] " + L.registerAdapter);
     

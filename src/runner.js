@@ -38,11 +38,19 @@ async function main() {
     // 5. プロンプトの受信と実行
     process.on('message', async (message) => {
         if (message.type === 'run') {
-            const { input, prompt_id, resumedSessionData } = message;
+            const { input, prompt_id, resumedSessionData, model } = message;
             
             try {
                 if (resumedSessionData && resumedSessionData.conversation) {
                     config.setSessionId(resumedSessionData.conversation.sessionId);
+                }
+                
+                if (model) {
+                    settings.merged.model.name = model;
+                    if (config.settings && config.settings.model) {
+                        config.settings.model.name = model;
+                    }
+                    console.log(`[Runner] Using model: ${model}`);
                 }
 
                 // gemini.js のメインループを呼び出す
