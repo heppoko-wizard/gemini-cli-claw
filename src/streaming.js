@@ -12,27 +12,6 @@ const { injectToolHistoryIntoOpenClaw } = require('./injector');
 // ---------------------------------------------------------------------------
 
 const __dir = path.resolve(__dirname, '..');
-const geminiBinPath = path.join(__dir, 'node_modules', '.bin', 'gemini');
-
-// Bun優先: Bunが利用可能ならBun経由でGemini CLIを起動（高速起動）
-const { execSync } = require('child_process');
-let useBun = false;
-try { execSync('bun --version', { stdio: 'ignore' }); useBun = true; } catch (_) {}
-
-let commandToRun, commandArgs;
-if (useBun && fs.existsSync(geminiBinPath)) {
-    commandToRun = 'bun';
-    commandArgs  = [geminiBinPath];
-    log('Runtime: Bun (gemini via bun)');
-} else if (fs.existsSync(geminiBinPath)) {
-    commandToRun = geminiBinPath;
-    commandArgs  = [];
-    log('Runtime: Node.js (gemini direct)');
-} else {
-    commandToRun = 'gemini';
-    commandArgs  = [];
-    log('Runtime: system gemini');
-}
 
 const GEMINI_TIMEOUT_MS = 180_000; // 3 minutes
 
@@ -103,25 +82,16 @@ function prepareGeminiEnv({ sessionKey, workspaceDir, systemPrompt }) {
 // Gemini CLI runner (streaming → SSE)
 // ---------------------------------------------------------------------------
 
+const { runnerPool } = require('./runner-pool.js');
+
 /**
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
- * streaming output back as OpenAI-compatible SSE chunks.
+ * streaming output back as OpenAI-compatible SSE chunks via RunnerPool.
  */
 async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
-    const reqModel = model || 'auto-gemini-3';
-    const geminiArgs = ['--yolo', '--allowed-mcp-server-names', 'openclaw-tools', '-o', 'stream-json', '--model', reqModel];
-
     const responseId = `resp_${requestId}`;
-
-    if (global.useFallbackSpawn) {
-        log(`[fallback] Using legacy spawn mode for request ${requestId}`);
-        return runGeminiStreamingFallback(geminiArgs, env, res, responseId, onSessionId, sessionKey, perfStart);
-    }
-
-    // Performance profiling markers
     const perfStart = Date.now();
     let perfFirstToken = null;
-    const perfTools = {};
 
     // Send initial completions chunk
     sseWrite(res, {
@@ -136,69 +106,154 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
         }]
     });
 
-        const { generateContentDirect } = await import('./gemini-core-facade.js');
-        const abortController = new AbortController();
+    try {
+        log(`[adapter] Acquiring runner for sessionKey: ${sessionKey}`);
         
-        let fullText = '';
-
-        try {
-            // Transform OpenAI-compatible messages to Gemini-compatible Contents
-            const reqMessages = messages && messages.length > 0 ? messages : [{ role: 'user', content: prompt }];
-            let formattedContents = reqMessages.map(msg => {
-                // OpenAI 'assistant' -> Gemini 'model'
-                const role = msg.role === 'assistant' ? 'model' : (msg.role === 'system' ? 'user' : 'user');
+        // 履歴をGemini CLIの内部SessionData形式に合成する
+        let resumedSessionData = undefined;
+        if (messages && messages.length > 0) {
+            const geminiMessages = messages.map(msg => {
                 let text = '';
-                
                 if (typeof msg.content === 'string') {
                     text = msg.content;
                 } else if (Array.isArray(msg.content)) {
                     text = msg.content.map(p => p.type === 'text' ? p.text : '').join('\n');
                 }
-                
-                return { role, parts: [{ text }] };
+                return {
+                    type: msg.role === 'assistant' ? 'gemini' : 'user',
+                    content: [{ text: text }]
+                };
             });
+            // Gemini APIは user/gemini(model) が交互である必要はないが、CLIの再開機構に乗せる構造を作る
+            resumedSessionData = {
+                conversation: {
+                    sessionId: sessionKey || 'default',
+                    startTime: new Date().toISOString(),
+                    lastUpdated: new Date().toISOString(),
+                    messages: geminiMessages
+                },
+                filePath: 'memory-injected'
+            };
+        }
 
-            // Gemini API requires alternating user/model roles.
-            // If there are consecutive 'user' or 'model' roles, we need to merge them to prevent API errors.
-            const mergedContents = [];
-            for (const content of formattedContents) {
-                if (mergedContents.length > 0 && mergedContents[mergedContents.length - 1].role === content.role) {
-                    mergedContents[mergedContents.length - 1].parts[0].text += '\n\n' + content.parts[0].text;
-                } else {
-                    mergedContents.push({
-                        role: content.role,
-                        parts: [{ text: content.parts[0].text }]
-                    });
+        // 1. プールからRunnerプロセスを取得（またはキュー待ち）
+        const runner = await runnerPool.acquireRunner({
+            input: prompt,
+            promptId: requestId,
+            resumedSessionData
+        });
+
+        let buffer = '';
+        let fullText = '';
+
+        // 2. 標準出力をパースし、SSEでストリーミング
+        runner.stdout.on('data', chunk => {
+            const raw = chunk.toString('utf-8');
+            log(`[stdout] ${raw.substring(0, 200)}`);
+            buffer += raw;
+
+            let boundary = buffer.indexOf('\n');
+            while (boundary !== -1) {
+                const line = buffer.substring(0, boundary).trim();
+                buffer = buffer.substring(boundary + 1);
+                boundary = buffer.indexOf('\n');
+
+                if (!line) continue;
+
+                let json;
+                try { json = JSON.parse(line); } catch (_) { continue; }
+
+                switch (json.type) {
+                    case 'init':
+                    case 'result':
+                        if (json.session_id && onSessionId) {
+                            onSessionId(json.session_id);
+                        }
+                        break;
+
+                    case 'stream':
+                    case 'message':
+                        // Gemini CLIの stream-json は 'user' メッセージもダンプするため、AIの返答のみを抽出
+                        if (json.role === 'assistant' || json.role === 'model') {
+                            if (json.content) {
+                                if (!perfFirstToken) {
+                                    perfFirstToken = Date.now();
+                                    log(`[perf] Time To First Token: ${((perfFirstToken - perfStart) / 1000).toFixed(2)}s`);
+                                }
+                                fullText += json.content;
+                                sseWrite(res, {
+                                    id: responseId,
+                                    object: 'chat.completion.chunk',
+                                    created: Math.floor(Date.now() / 1000),
+                                    model: 'gemini',
+                                    choices: [{
+                                        index: 0,
+                                        delta: { content: json.content },
+                                        finish_reason: null
+                                    }]
+                                });
+                            }
+                        }
+                        break;
+
+                    case 'tool_use':
+                        // ツール使用開始の通知（プレースホルダー的なUI用）
+                        sseWrite(res, {
+                            id: responseId,
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(Date.now() / 1000),
+                            model: 'gemini',
+                            choices: [{
+                                index: 0,
+                                delta: { content: `\n\n⚙️ Using tool [${json.tool_name}] ...\n` },
+                                finish_reason: null
+                            }]
+                        });
+                        break;
+
+                    case 'tool_result':
+                        // ツール実行結果の通知
+                        const statusIcon = json.status === 'success' ? '✅' : '❌';
+                        sseWrite(res, {
+                            id: responseId,
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(Date.now() / 1000),
+                            model: 'gemini',
+                            choices: [{
+                                index: 0,
+                                delta: { content: `${statusIcon} Tool finished.\n\n` },
+                                finish_reason: null
+                            }]
+                        });
+                        break;
+
+                    case 'error':
+                        sseWrite(res, {
+                            id: responseId,
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(Date.now() / 1000),
+                            model: 'gemini',
+                            choices: [{
+                                index: 0,
+                                delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` },
+                                finish_reason: null
+                            }]
+                        });
+                        break;
                 }
             }
-            
-            // Ensure the last message is always from 'user'
-            if (mergedContents.length > 0 && mergedContents[mergedContents.length - 1].role !== 'user') {
-                 mergedContents.push({ role: 'user', parts: [{ text: 'Please continue.' }] });
-            }
+        });
 
-            const response = await generateContentDirect(
-                requestId,
-                mergedContents,
-                reqModel,
-                abortController.signal
-            );
-            
-            fullText = response.text;
-            
-            // 一括で受け取った結果をSSEとして吐き出す
-            sseWrite(res, {
-                id: responseId,
-                object: 'chat.completion.chunk',
-                created: Math.floor(Date.now() / 1000),
-                model: 'gemini',
-                choices: [{
-                    index: 0,
-                    delta: { content: fullText },
-                    finish_reason: null
-                }]
-            });
-            
+        let stderr = '';
+        runner.stderr.on('data', chunk => { stderr += chunk.toString('utf-8'); });
+
+        // 3. プロセスが終了したら完了レスポンスを送る
+        runner.on('close', code => {
+            const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
+            log(`[perf] Runner process closed with code ${code}. Total duration: ${totalDur}s`);
+            if (stderr.trim()) log(`Runner stderr: ${stderr.trim().substring(0, 300)}`);
+
+            // Send completion chunk
             sseWrite(res, {
                 id: responseId,
                 object: 'chat.completion.chunk',
@@ -212,11 +267,10 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
             });
             res.write('data: [DONE]\n\n');
             res.end();
-            const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
-            log(`[perf] Gemini API call completed directly. Total duration: ${totalDur}s`);
+        });
 
-        } catch (err) {
-            log(`Gemini CLI failed: ${err.message}`);
+        runner.on('error', err => {
+            log(`Runner process stream error: ${err.message}`);
             sseWrite(res, {
                 id: responseId,
                 object: 'chat.completion.chunk',
@@ -224,122 +278,16 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 model: 'gemini',
                 choices: [{
                     index: 0,
-                    delta: { content: `\n⚠️ Gemini CLI API failed: ${err.message}` },
+                    delta: { content: `\n⚠️ Runner failed: ${err.message}` },
                     finish_reason: 'error'
                 }]
             });
             res.write('data: [DONE]\n\n');
             res.end();
-        }
-}
-
-/**
- * フォールバック用の従来の spawn を使った外部プロセス呼び出し
- */
-function runGeminiStreamingFallback(geminiArgs, env, res, responseId, onSessionId, sessionKey, perfStart) {
-    const finalArgs = [...commandArgs, ...geminiArgs];
-    log(`spawn (fallback): ${commandToRun} ${finalArgs.slice(0, 4).join(' ')} ...`);
-
-    const geminiProcess = spawn(commandToRun, finalArgs, {
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let buffer = '';
-    let fullText = '';
-    const collectedTools = [];
-    let perfFirstToken = null;
-    const perfTools = {};
-
-    geminiProcess.stdout.on('data', chunk => {
-        const raw = chunk.toString('utf-8');
-        log(`[stdout] ${raw.substring(0, 200)}`);
-        buffer += raw;
-
-        let boundary = buffer.indexOf('\n');
-        while (boundary !== -1) {
-            const line = buffer.substring(0, boundary).trim();
-            buffer = buffer.substring(boundary + 1);
-            boundary = buffer.indexOf('\n');
-
-            if (!line) continue;
-
-            let json;
-            try { json = JSON.parse(line); } catch (_) { continue; }
-
-            switch (json.type) {
-                case 'init':
-                case 'result':
-                    if (json.session_id && onSessionId) {
-                        onSessionId(json.session_id);
-                    }
-                    break;
-
-                case 'stream':
-                case 'message':
-                    if (json.content || (json.role === 'assistant' && json.content)) {
-                        if (!perfFirstToken) {
-                            perfFirstToken = Date.now();
-                            log(`[perf] Time To First Token: ${((perfFirstToken - perfStart) / 1000).toFixed(2)}s`);
-                        }
-                        fullText += json.content;
-                        sseWrite(res, {
-                            id: responseId,
-                            object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: json.content },
-                                finish_reason: null
-                            }]
-                        });
-                    }
-                    break;
-
-                case 'error':
-                    sseWrite(res, {
-                        id: responseId,
-                        object: 'chat.completion.chunk',
-                        created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
-                        choices: [{
-                            index: 0,
-                            delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` },
-                            finish_reason: null
-                        }]
-                    });
-                    break;
-            }
-        }
-    });
-
-    let stderr = '';
-    geminiProcess.stderr.on('data', chunk => { stderr += chunk.toString('utf-8'); });
-
-    geminiProcess.on('close', code => {
-        const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
-        log(`[perf] Gemini CLI fallback process closed with code ${code}. Total duration: ${totalDur}s`);
-        if (stderr.trim()) log(`Gemini CLI stderr: ${stderr.trim().substring(0, 300)}`);
-
-        // Send completion chunk
-        sseWrite(res, {
-            id: responseId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{
-                index: 0,
-                delta: {},
-                finish_reason: 'stop'
-            }]
         });
-        res.write('data: [DONE]\n\n');
-        res.end();
-    });
 
-    geminiProcess.on('error', err => {
-        log(`Gemini CLI fallback failed to start: ${err.message}`);
+    } catch (err) {
+        log(`[adapter] Error starting runner: ${err.message}`);
         sseWrite(res, {
             id: responseId,
             object: 'chat.completion.chunk',
@@ -347,22 +295,13 @@ function runGeminiStreamingFallback(geminiArgs, env, res, responseId, onSessionI
             model: 'gemini',
             choices: [{
                 index: 0,
-                delta: { content: `\n⚠️ Gemini CLI failed to start in fallback mode: ${err.message}` },
+                delta: { content: `\n⚠️ Pool Error: ${err.message}` },
                 finish_reason: 'error'
             }]
         });
         res.write('data: [DONE]\n\n');
         res.end();
-    });
-
-    const timeout = setTimeout(() => {
-        log(`[perf] Gemini CLI fallback timed out`);
-        geminiProcess.kill('SIGTERM');
-        res.write('data: [DONE]\n\n');
-        res.end();
-    }, GEMINI_TIMEOUT_MS);
-
-    geminiProcess.on('close', () => clearTimeout(timeout));
+    }
 }
 
 module.exports = { prepareGeminiEnv, runGeminiStreaming };

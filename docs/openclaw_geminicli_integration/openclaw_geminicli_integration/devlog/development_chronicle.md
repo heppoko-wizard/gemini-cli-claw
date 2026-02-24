@@ -121,3 +121,54 @@
 
 ### 成果
 - パースエラーやSSE（チャンク）出力形式のエラーも解消し、フロントエンド（OpenClaw）側に文脈を踏まえたまともなチャット応答が安定して出力されるようになった。
+
+---
+# 2026-02-23 開発ログ
+
+## セッション 8: Warm Standby Runner Pool の実装（起動税ゼロ × ツール完全対応）
+
+### やったこと
+- **課題**: セッション6の「ライブラリ直接呼び出し」はTTFTを改善したが、MCPツール実行などのAgentループが動作しない問題があった。
+- **解決策（Warm Standby + Queue パターン）**:
+  - `src/runner.js` 新規作成。Gemini CLIの `runNonInteractive()` をそのまま呼ぶ「使い捨てRunner」。初期化完了後にIPCで `ready` を送信して待機。
+  - `src/runner-pool.js` 新規作成。RunnerPool クラス（常時1プロセスをWarm Standby保持、FIFOキュー付き）。
+  - `src/streaming.js` 全面書き換え。RunnerPool統合・JSONLストリーム解析・SSE変換。
+  - `src/server.js` からGemini Core初期化処理を削除。
+- **会話履歴の受け渡し**: `resumedSessionData`（messages配列を含むJSON）をIPCでRunnerに直接渡す方式を採用し、ディスクI/Oと競合リスクを排除。
+
+### 発見・学んだこと
+- Gemini CLIの `runNonInteractive()` は `resumedSessionData`（sessionId + messages構造体）を直接渡せる。
+- RunnerのstdoutにはAIの回答以外にユーザープロンプトのエコーが含まれるため `streaming.js` 側でフィルタが必要。
+
+### ハマったこと・失敗
+- **現象**: Runner起動直後にIPC送信すると `target closed` エラー。
+- **原因**: `ready` シグナルより前にプロンプトが送信されていた。
+- **対処**: RunnerPool内でPromiseを使い、`ready` 受信まで送信をブロックする制御フローに変更。
+
+### 成果
+- **TTFT: 12秒 → ほぼ0秒**（Gemini CLIの起動税を完全排除）
+- **MCPツール（google_web_search、shell、browser等）が完全動作**するようになった
+
+### 変更したファイル
+- `src/runner.js` — 新規作成：Warm Standby 実行ランナー
+- `src/runner-pool.js` — 新規作成：RunnerPool クラス（プロセス管理・FIFOキュー）
+- `src/streaming.js` — 全面書き換え：RunnerPool 統合・SSE変換
+- `src/server.js` — Gemini Core 初期化ロジックを削除、RunnerPool へ委譲
+
+---
+# 2026-02-24 開発ログ
+
+## セッション 9: 環境復旧および Gemini CLI ツール仕様の調査
+
+### やったこと
+- **GoogleDrive_Sync マウントのハング対応**: rclone FUSEマウントが切断状態（ENOTCONN）となり、OpenClawのskillsウォッチャーがシンボリックリンクを踏んでクラッシュする連鎖障害を解決。
+  - `~/.antigravity-agent` シンボリックリンクをローカルディレクトリに置き換え（根本対処済み）。
+  - `sudo umount -l` で壊れたFUSEマウントを強制解除し、ドライブの再接続に成功。
+  - `~/.bashrc_global`, `~/.claude.json`, `~/.local/bin/openclaw`, `~/net_watchdog.py` のシンボリックリンクを解除してローカル実体化。
+- **Gemini CLI `google_web_search` ツール仕様調査**: `web-search.js` ソースコードを確認し以下を確認。
+  - `model: 'web-search'` という特殊なGemini APIエンドポイントへの単一API呼び出しで完結する。
+  - バックエンドでGoogleが検索・ページ取得・要約を一括処理する「Search Grounding」機能を利用（クライアント側からは1回のAPIコールに見える）。
+  - これはOpenClawの `web_search`（BraveSearch）/ `web_fetch`（URL直接取得）/ `browser`（Playwright）とは根本的に異なるアーキテクチャ。
+
+### 残った課題・TODO
+- [ ] GoogleDrive_Sync 上の `ai_tools/` や `Global_Env/home/` 以下のファイル（`.claude.json` 等）が消失しており、空ファイルで代替中。必要であれば再作成が必要。

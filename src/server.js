@@ -80,7 +80,11 @@ const server = http.createServer(async (req, res) => {
         const stream      = body.stream !== false;
         const sessionKey  = body._openclawSessionKey || body._sessionId || 'default';
         const workspaceDir = body._workspaceDir || process.cwd();
-        const reqModel     = body.model || 'auto-gemini-3';
+        
+        let reqModel = body.model || 'auto-gemini-3';
+        if (reqModel === 'auto' || reqModel === 'gemini') {
+            reqModel = 'auto-gemini-3';
+        }
 
         // Extract system prompt from the messages array
         const systemMsg = messages.find(m => m.role === 'system');
@@ -221,28 +225,10 @@ const server = http.createServer(async (req, res) => {
 // グローバルなフォールバックフラグの定義（streaming.js等で参照する）
 global.useFallbackSpawn = false;
 
-(async () => {
-    let initializeGeminiCore;
-    try {
-        const facade = await import('./gemini-core-facade.js');
-        initializeGeminiCore = facade.initializeGeminiCore;
-    } catch (err) {
-        console.error("Failed to load gemini-core-facade.js", err);
-        process.exit(1);
-    }
-    try {
-        log('Initializing Gemini Core... This may take up to 15 seconds.');
-        await initializeGeminiCore();
-        log('Gemini Core initialized successfully.');
-    } catch (err) {
-        log(`Failed to initialize Gemini Core: ${err.message}. Enabling fallback spawn mode.`);
-        global.useFallbackSpawn = true;
-    }
-
-    server.listen(PORT, () => {
-        log(`Gemini CLI adapter listening on port ${PORT}`);
-    });
-})();
+// サーバー起動
+server.listen(PORT, () => {
+    log(`Gemini CLI adapter listening on port ${PORT}`);
+});
 
 server.on('error', err => {
     console.error('[adapter] Server error:', err.message);
