@@ -124,6 +124,11 @@ Major planned updates include:
 | **Node.js** | v24.13.0 |
 | **OS** | Linux (x86_64) |
 
+> [!NOTE]
+> The installer downloads the **latest stable versions** of OpenClaw and Gemini CLI at the time of installation.
+> The core APIs used by this adapter are stable, so newer versions should work without issues.
+> If you experience any problems, try downgrading to the versions listed above to reproduce the verified test environment.
+
 ## Disclaimer
 
 This software is an unofficial community-made adapter and is not affiliated with, endorsed, or supported by Google. Use of the Gemini CLI and associated Google accounts is at your own risk. The authors are not responsible for any account suspensions, data loss, or other damages resulting from the use of this software. It is provided "as is" without any warranty.

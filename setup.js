@@ -51,9 +51,10 @@ const MSG = {
         authStart: "認証を開始します。ターミナルに表示される指示に従ってログインしてください...",
         authSuccess: "✓ Gemini 認証完了",
         authMissingTip: "情報: 認証資格情報がまだ見つかりません。後で手動で `npx @google/gemini-cli login` を実行する必要があるかもしれません。",
-        configTip: "まだ設定していない場合は、~/.openclaw/openclaw.json に以下を追加してください:",
-        finish: "セットアップがすべて完了しました！",
-        tryIt: "試してみる: node ../scripts/run-node.mjs agent -m 'こんにちは' --local"
+        finish: "セットアップが完了しました！",
+        configTip: "OpenClaw でこのアダプタを使用するには、~/.openclaw/openclaw.json に以下のように設定してください:",
+        tryIt: "さっそく OpenClaw を起動して Gemini CLI と会話してみましょう！",
+        versionNote: "ℹ️ 注意: OpenClaw と Gemini CLI はインストール時点の最新安定版が導入されました。もし不具合が見られる場合は、README に記載された「動作確認環境」のバージョンにダウングレードすることでテスト済み環境を再現できます。"
     },
     en: {
         selectLang: "Select language / 言語選択 / 选择语言 [1] English [2] 日本語 [3] 简体中文 (1/2/3): ",
@@ -84,9 +85,10 @@ const MSG = {
         authStart: "Starting authentication. Please follow the instructions to login...",
         authSuccess: "✓ Gemini authentication complete",
         authMissingTip: "Info: Authentication credentials still not found. You may need to manually run `npx @google/gemini-cli login` later.",
-        configTip: "If you haven't already, add this to ~/.openclaw/openclaw.json:",
-        finish: "Setup is fully complete!",
-        tryIt: "Try it out: node ../scripts/run-node.mjs agent -m 'hello' --local"
+        finish: "Setup complete!",
+        configTip: "To use this adapter in OpenClaw, please add the following configuration to your ~/.openclaw/openclaw.json:",
+        tryIt: "Start OpenClaw now and try chatting with Gemini CLI!",
+        versionNote: "ℹ️ Note: The latest stable versions of OpenClaw and Gemini CLI have been installed. If you encounter any issues, please check the 'Tested With' section in the README and downgrade to the verified versions to reproduce the test environment."
     },
     zh: {
         selectLang: "Select language / 言語選択 / 选择语言 [1] English [2] 日本語 [3] 简体中文 (1/2/3): ",
@@ -117,9 +119,10 @@ const MSG = {
         authStart: "开始身份验证。请按照终端显示的说明进行登录...",
         authSuccess: "✓ Gemini 身份验证完成",
         authMissingTip: "提示：仍未发现身份验证凭据。您稍后可能需要手动运行 `npx @google/gemini-cli login`。",
-        configTip: "如果尚未配置，请将以下内容添加到 ~/.openclaw/openclaw.json：",
-        finish: "安装全部完成！",
-        tryIt: "尝试运行：node ../scripts/run-node.mjs agent -m '你好' --local"
+        finish: "安装完成！",
+        configTip: "如果要在 OpenClaw 中使用此适配器，请在您的 ~/.openclaw/openclaw.json 中添加以下配置：",
+        tryIt: "现在启动 OpenClaw，尝试与 Gemini CLI 聊天吧！",
+        versionNote: "ℹ️ 提示：安装程序已为您下载最新稳定版的 OpenClaw 和 Gemini CLI。如果使用中出现问题，建议您查看 README 中的“测试环境”章节，将组件降级到已验证的版本。"
     }
 };
 
@@ -399,6 +402,8 @@ async function main() {
     console.log('  "providers": { "gemini-adapter": { "type": "openai", "baseUrl": "http://localhost:3972", ... } }');
     console.log("");
     console.log(L.tryIt);
+    console.log("");
+    console.log(L.versionNote);
     console.log("=================================================");
 
     rl.close();
