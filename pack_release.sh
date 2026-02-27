@@ -55,6 +55,8 @@ cp -r "$ADAPTER_DIR/scripts/"* "$STAGE_ADAPTER/scripts/"
 cp "$ADAPTER_DIR/mcp-server.mjs" "$STAGE_ADAPTER/"
 cp "$ADAPTER_DIR/package.json" "$STAGE_ADAPTER/"
 cp "$ADAPTER_DIR/start.sh" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/installer-gui.js" "$STAGE_ADAPTER/"
+cp -r "$ADAPTER_DIR/public" "$STAGE_ADAPTER/"
 
 # --- 3. sensitive data double-check ---
 echo "Cleaning up any potential sensitive data..."

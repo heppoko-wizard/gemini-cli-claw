@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw Gemini CLI Adapter - Setup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .step { display: none; opacity: 0; transition: opacity 0.3s ease-in-out; }
+        .step.active { display: block; opacity: 1; }
+        pre { background: #020617; border: 1px solid #334155; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+<div class="glass-panel w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[600px]">
+    
+    <!-- Header -->
+    <div class="px-6 py-4 border-b border-slate-700/50 bg-slate-800/50 flex justify-between items-center">
+        <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Gemini CLI Adapter Setup</h1>
+        <div id="step-indicator" class="text-xs font-semibold text-slate-400">Step 1 of 6</div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="p-6 flex-grow overflow-y-auto relative">
+        
+        <!-- Step 1: Welcome & Status -->
+        <div id="step-1" class="step active space-y-4">
+            <h2 class="text-2xl font-semibold mb-2">Welcome to the Setup Wizard</h2>
+            <p class="text-slate-300 leading-relaxed">
+                This wizard will configure the OpenClaw Gemini CLI adapter on your system.
+            </p>
+            <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700 mt-4">
+                <h3 class="font-medium text-slate-200 mb-2">System Check:</h3>
+                <ul class="space-y-2 text-sm">
+                    <li id="status-openclaw" class="flex items-center gap-2">
+                        <span class="w-4 h-4 rounded-full border-2 border-slate-600 animate-pulse"></span> Checking OpenClaw directory...
+                    </li>
+                    <li id="status-auth" class="flex items-center gap-2">
+                        <span class="w-4 h-4 rounded-full border-2 border-slate-600 animate-pulse"></span> Checking Gemini Authentication...
+                    </li>
+                </ul>
+            </div>
+            <p id="env-error-msg" class="text-red-400 text-sm mt-2 hidden">
+                Error: OpenClaw base directory not found. Please place this adapter folder inside the main OpenClaw directory.
+            </p>
+        </div>
+
+        <!-- Step 2: Information -->
+        <div id="step-2" class="step space-y-4">
+            <h2 class="text-2xl font-semibold mb-2">Installation Details</h2>
+            <p class="text-sm text-slate-300">This installer will set up a dedicated environment for Gemini CLI specifically for OpenClaw.</p>
+            
+            <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700 text-sm space-y-3">
+                <div class="flex items-start gap-3">
+                    <div class="text-blue-400 mt-0.5">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-white">Dedicated Installation:</span>
+                        <p class="text-slate-400 mt-1">Gemini CLI is installed in isolation within this folder (<code class="text-blue-300">src/.gemini</code>).</p>
+                    </div>
+                </div>
+                <div class="flex items-start gap-3">
+                    <div class="text-blue-400 mt-0.5">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-white">No Global Interference:</span>
+                        <p class="text-slate-400 mt-1">If you already have Gemini CLI installed on your PC, it will not be affected. Settings and credentials are not shared.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Warning (YOLO Mode) -->
+        <div id="step-3" class="step space-y-4">
+            <h2 class="text-2xl text-red-400 font-semibold mb-2 flex items-center gap-2">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                Important Warning
+            </h2>
+            <div class="bg-red-950/30 border border-red-900/50 p-4 rounded-lg text-sm text-red-200">
+                <p class="font-bold mb-2 text-white">This software enables "YOLO Mode" by default.</p>
+                <p class="mb-2">Gemini CLI will attempt to execute commands, create, edit, or delete files automatically <strong>without asking for permission</strong> to fulfill your AI requests.</p>
+                <ul class="list-disc pl-5 mt-2 space-y-1 text-red-300/80">
+                    <li>Do NOT run this on production servers or directories containing sensitive unbacked-up data.</li>
+                    <li>Only use this within safe, tested environments.</li>
+                </ul>
+            </div>
+            <label class="flex items-center gap-3 mt-4 cursor-pointer p-3 bg-slate-800/50 rounded-lg border border-slate-700 hover:bg-slate-800 transition">
+                <input type="checkbox" id="agree-warning" class="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500 bg-slate-700">
+                <span class="text-sm font-medium">I understand the risks and agree to proceed.</span>
+            </label>
+        </div>
+
+        <!-- Step 4: Configuration Preferences -->
+        <div id="step-4" class="step space-y-4">
+            <h2 class="text-2xl font-semibold mb-2">Configuration</h2>
+            <p class="text-slate-300">Do you want to set the Gemini Adapter as the default primary model in OpenClaw?</p>
+            
+            <div class="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+                <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" id="set-primary" checked class="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500 bg-slate-700">
+                    <div>
+                        <span class="font-medium text-white block">Set as Primary Model</span>
+                        <span class="text-xs text-slate-400">Updates ~/.openclaw/openclaw.json automatically.</span>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- Step 5: Execute Setup -->
+        <div id="step-5" class="step h-full flex flex-col">
+            <h2 class="text-2xl font-semibold mb-2">Installing...</h2>
+            <p class="text-sm text-slate-400 mb-2">Please wait while dependencies are installed and configured.</p>
+            
+            <div class="flex-grow bg-[#020617] rounded-lg border border-slate-700 p-3 overflow-hidden flex flex-col relative font-mono text-xs">
+                <div id="terminal-output" class="flex-grow overflow-y-auto space-y-1 text-slate-300 pb-8">
+                    <!-- Logs go here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6: Authentication -->
+        <div id="step-6" class="step space-y-4">
+            <h2 class="text-2xl font-semibold mb-2">Authentication</h2>
+            
+            <div id="auth-status-container" class="bg-slate-800/80 p-6 rounded-lg border border-slate-700 flex flex-col items-center justify-center text-center space-y-4">
+                <div id="auth-loading" class="hidden">
+                    <div class="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+                    <p class="text-lg font-medium">Waiting for Authentication...</p>
+                    <p class="text-sm text-slate-400 mt-2">Please switch to your browser window and log in with your Google account.</p>
+                    <p class="text-xs text-slate-500 mt-4">* If the CLI asks for permission, just press "Enter".</p>
+                </div>
+                
+                <div id="auth-success-msg" class="hidden">
+                    <div class="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <p class="text-xl font-bold text-white">Authenticated Successfully!</p>
+                </div>
+
+                <div id="auth-prompt" class="w-full text-left">
+                    <p class="mb-4">Gemini API credentials are required. They will be stored securely and isolated in this directory.</p>
+                    <button id="btn-start-auth" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                        Log in with Google Account
+                    </button>
+                    <button id="btn-skip-auth" class="w-full py-2 mt-2 text-slate-400 hover:text-white transition text-sm">
+                        Skip for now (I will run 'npx gemini login' manually)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 7: Finish -->
+        <div id="step-7" class="step h-full flex flex-col justify-center items-center text-center space-y-6">
+            <div class="relative">
+                <div class="absolute inset-0 bg-blue-500 blur-xl opacity-20 rounded-full"></div>
+                <div class="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center relative z-10 shadow-xl border-4 border-slate-800">
+                    <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+            </div>
+            
+            <div>
+                <h2 class="text-3xl font-bold text-white mb-2">Setup Complete!</h2>
+                <p class="text-slate-400">The adapter is ready to use with OpenClaw.</p>
+            </div>
+            
+            <div class="bg-slate-800/50 border border-slate-700 p-4 rounded-lg text-sm text-left w-full">
+                <p class="font-medium text-slate-200 mb-2">Next Steps:</p>
+                <ol class="list-decimal pl-5 space-y-2 text-slate-400">
+                    <li>Ensure this adapter is running (it stays active or runs via <code class="text-blue-300 bg-blue-900/30 px-1 rounded">start.sh</code>).</li>
+                    <li>Start the main OpenClaw gateway (<code class="text-blue-300 bg-blue-900/30 px-1 rounded">npm run start</code>).</li>
+                    <li>Message your AI bot on Telegram to begin chatting!</li>
+                </ol>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer Controls -->
+    <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-900/80 flex justify-between items-center" id="footer-controls">
+        <button id="btn-prev" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition" disabled>
+            Back
+        </button>
+        <button id="btn-next" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium shadow-lg transition" disabled>
+            Next
+        </button>
+    </div>
+</div>
+
+<script>
+    // Logic encapsulated in IIFE
+    (async function() {
+        const totalSteps = 7;
+        let currentStep = 1;
+        let globalState = { isOpenClawRoot: false, hasAuth: false };
+        let sse = null;
+
+        const ui = {
+            stepIndicator: document.getElementById('step-indicator'),
+            btnPrev: document.getElementById('btn-prev'),
+            btnNext: document.getElementById('btn-next'),
+            footer: document.getElementById('footer-controls'),
+            terminal: document.getElementById('terminal-output'),
+        };
+
+        const updateUI = () => {
+            // Hide all steps
+            document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+            // Show current step
+            document.getElementById(`step-${currentStep}`).classList.add('active');
+            
+            ui.stepIndicator.textContent = `Step ${currentStep} of ${totalSteps}`;
+            ui.btnPrev.disabled = currentStep === 1 || currentStep === 5 || currentStep === 7;
+            
+            // Default Next button logic
+            ui.btnNext.textContent = currentStep === totalSteps ? 'Finish & Exit' : 'Next';
+            ui.btnNext.disabled = false;
+
+            // Step specific UI constraints
+            if (currentStep === 1) {
+                if (!globalState.isOpenClawRoot) ui.btnNext.disabled = true;
+            } else if (currentStep === 3) {
+                ui.btnNext.disabled = !document.getElementById('agree-warning').checked;
+            } else if (currentStep === 5) {
+                ui.btnNext.disabled = true; // Wait for install to finish
+                ui.footer.classList.add('opacity-50', 'pointer-events-none');
+                startInstallation(); // Trigger payload
+            } else if (currentStep === 6) {
+                ui.btnNext.disabled = true; // Handled by auth buttons
+                ui.footer.classList.add('hidden'); // Hide footer completely during auth choice
+            } else if (currentStep === 7) {
+                ui.footer.classList.remove('hidden');
+                ui.btnPrev.classList.add('hidden'); // No going back after finish
+            }
+        };
+
+        const appendLog = (msg, type) => {
+            const div = document.createElement('div');
+            let colorCls = 'text-slate-400';
+            if (type === 'step_start') colorCls = 'text-blue-400 font-bold mt-2';
+            else if (type === 'step_done') colorCls = 'text-green-400 font-bold';
+            else if (type === 'step_error') colorCls = 'text-red-400 font-bold';
+            else if (type === 'warning') colorCls = 'text-yellow-400';
+            
+            div.className = colorCls;
+            div.textContent = msg;
+            ui.terminal.appendChild(div);
+            ui.terminal.scrollTop = ui.terminal.scrollHeight;
+        };
+
+        // Network functions
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                globalState = data;
+                
+                const sqOClaw = document.getElementById('status-openclaw');
+                const sqAuth = document.getElementById('status-auth');
+                
+                if (data.isOpenClawRoot) {
+                    sqOClaw.innerHTML = `<span class="text-green-400">✓</span> OpenClaw root detected`;
+                    ui.btnNext.disabled = false;
+                } else {
+                    sqOClaw.innerHTML = `<span class="text-red-400">✗</span> Not inside OpenClaw root`;
+                    document.getElementById('env-error-msg').classList.remove('hidden');
+                }
+
+                if (data.hasAuth) {
+                    sqAuth.innerHTML = `<span class="text-green-400">✓</span> Gemini Credentials Found`;
+                } else {
+                    sqAuth.innerHTML = `<span class="text-yellow-400">?</span> No Credentials (will prompt later)`;
+                }
+            } catch (e) {
+                console.error("Status fetch failed", e);
+            }
+        }
+
+        async function startInstallation() {
+            // Setup SSE for logs
+            if (sse) sse.close();
+            sse = new EventSource('/api/logs');
+            sse.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                appendLog(data.message, data.type);
+                if (data.type === 'done') {
+                    sse.close();
+                    ui.footer.classList.remove('opacity-50', 'pointer-events-none');
+                    ui.btnNext.disabled = false;
+                    ui.btnNext.classList.add('animate-pulse'); // Call to action
+                }
+            };
+
+            const setPrimary = document.getElementById('set-primary').checked;
+            fetch('/api/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ setPrimary })
+            });
+        }
+
+        async function exitServer() {
+            ui.btnNext.disabled = true;
+            ui.btnNext.textContent = "Shutting down...";
+            try { await fetch('/api/exit', { method: 'POST' }); } catch(e){}
+            window.close();
+            document.body.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="text-center">
+                        <h1 class="text-2xl font-bold mb-2">You can close this tab safely.</h1>
+                        <p class="text-slate-400">The installer server has shut down.</p>
+                    </div>
+                </div>`;
+        }
+
+        // Setup Event Listeners
+        document.getElementById('agree-warning').addEventListener('change', (e) => {
+            if (currentStep === 3) ui.btnNext.disabled = !e.target.checked;
+        });
+
+        ui.btnPrev.addEventListener('click', () => {
+            if (currentStep > 1) { currentStep--; updateUI(); }
+        });
+
+        ui.btnNext.addEventListener('click', () => {
+            if (currentStep === totalSteps) {
+                exitServer();
+            } else {
+                currentStep++;
+                // Skip auth step if already authenticated
+                if (currentStep === 6 && globalState.hasAuth) {
+                    currentStep++;
+                }
+                updateUI();
+            }
+        });
+
+        // Auth Step Logic
+        let authPollIntv = null;
+        document.getElementById('btn-start-auth').addEventListener('click', async () => {
+            document.getElementById('auth-prompt').classList.add('hidden');
+            document.getElementById('auth-loading').classList.remove('hidden');
+            
+            await fetch('/api/auth/start', { method: 'POST' });
+            
+            // Poll for completion
+            authPollIntv = setInterval(async () => {
+                const res = await fetch('/api/auth/status');
+                const data = await res.json();
+                if (data.hasAuth) {
+                    clearInterval(authPollIntv);
+                    document.getElementById('auth-loading').classList.add('hidden');
+                    document.getElementById('auth-success-msg').classList.remove('hidden');
+                    
+                    setTimeout(() => {
+                        currentStep++;
+                        updateUI();
+                    }, 2000);
+                }
+            }, 2000);
+        });
+
+        document.getElementById('btn-skip-auth').addEventListener('click', () => {
+            if (authPollIntv) clearInterval(authPollIntv);
+            currentStep++;
+            updateUI();
+        });
+
+        // Initialize
+        updateUI();
+        await fetchStatus();
+
+    })();
+</script>
+</body>
+</html>
