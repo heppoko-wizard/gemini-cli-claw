@@ -281,28 +281,25 @@
                     <p>既存のシステム上の Gemini CLI の設定・認証情報には一切影響しません。</p>
                 </div>
 
-                <div id="auth-prompt" class="space-y-4">
-                    <div class="bg-amber-950/30 border border-amber-700/50 rounded-xl p-4 space-y-3">
-                        <p class="text-amber-300 text-sm font-semibold">⚠️ Gemini CLI の認証は TTY（ターミナル）が必要です</p>
-                        <p class="text-amber-200/80 text-xs">ブラウザ上から直接起動できないため、以下のコマンドを <strong>新しいターミナルウィンドウ</strong>
-                            で実行してください。</p>
-                    </div>
-
-                    <div id="auth-cmd-box" class="bg-slate-900 border border-slate-600 rounded-xl p-4 space-y-2">
-                        <p class="text-slate-400 text-xs mb-2">ターミナルで以下を実行：</p>
-                        <code id="auth-cmd-text"
-                            class="block text-blue-300 text-sm font-mono break-all bg-slate-800 p-3 rounded-lg">読み込み中...</code>
-                        <button id="btn-copy-cmd" class="text-xs text-slate-400 hover:text-white transition mt-1">📋
-                            コピー</button>
-                    </div>
-                    <p class="text-slate-500 text-xs">ログインが完了した後、下のボタンを押すと自動で確認します。</p>
-                    <button id="btn-start-poll"
-                        class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold transition shadow-lg">
-                        ✅ 認証完了しました（自動確認開始）
+                <div id="auth-prompt" class="space-y-3">
+                    <button id="btn-start-auth"
+                        class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition shadow-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                        </svg>
+                        Google アカウントでログイン（ブラウザが開きます）
                     </button>
-                    <button id="btn-skip-auth" class="w-full py-2 text-slate-400 hover:text-white text-sm transition">
+                    <button id="btn-skip-auth" class="w-full py-2 text-slate-500 hover:text-white text-sm transition">
                         スキップ（後で手動で実行）
                     </button>
+                </div>
+
+                <!-- 認証中ログ -->
+                <div id="auth-log-area" style="display:none">
+                    <div id="auth-terminal"
+                        style="font-family:'Courier New',monospace;background:#020617;border:1px solid #1e293b;height:150px;overflow-y:auto;padding:10px;border-radius:8px;font-size:12px;color:#94a3b8;">
+                    </div>
                 </div>
 
                 <div id="auth-waiting" class="hidden" style="display:none">
@@ -310,8 +307,8 @@
                         <div
                             class="w-14 h-14 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto">
                         </div>
-                        <p class="text-white font-semibold">認証を確認中...</p>
-                        <p class="text-slate-400 text-sm">資格情報ファイルを監視しています。ログイン完了後に自動で次へ進みます。</p>
+                        <p class="text-white font-semibold">ブラウザで Google ログインを進めてください...</p>
+                        <p class="text-slate-400 text-sm">認証が完了すると自動で次に進みます。</p>
                     </div>
                 </div>
 
@@ -460,7 +457,6 @@
                         $('status-notice').classList.remove('hidden');
                     }
                     btnNext.disabled = false;
-                    showAuthCommand(); // Step 6 用コマンド表示
                 } catch (e) {
                     console.error('Status fetch failed', e);
                     btnNext.disabled = false; // エラーでもブロックしない
@@ -491,45 +487,60 @@
                 }).catch(e => addLog(`Request error: ${e.message}`, 'step_error'));
             };
 
-            // --- Auth step: show command and setup polling ---
-            const startAuthPolling = () => {
-                $('auth-prompt').style.display = 'none';
+            // --- Auth step ---
+            const addAuthLog = (msg) => {
+                const el = $('auth-terminal');
+                if (!el || !msg.trim()) return;
+                const div = document.createElement('div');
+                div.textContent = msg;
+                el.appendChild(div);
+                el.scrollTop = el.scrollHeight;
+            };
+
+            $('btn-start-auth') && $('btn-start-auth').addEventListener('click', async () => {
+                $('btn-start-auth').disabled = true;
+                $('btn-start-auth').textContent = '認証プロセスを起動中...';
+                $('auth-log-area').style.display = 'block';
+
+                // SSE でauth ログを受信
+                const authSse = new EventSource('/api/logs');
+                authSse.onmessage = e => {
+                    const d = JSON.parse(e.data);
+                    addAuthLog(d.message);
+                    if (d.type === 'step_done' && d.message.includes('認証が完了')) {
+                        authSse.close();
+                        $('auth-prompt').style.display = 'none';
+                        $('auth-log-area').style.display = 'none';
+                        $('auth-done').style.display = 'block';
+                        setTimeout(() => { step++; render(); }, 2000);
+                    }
+                };
+                authSse.onerror = () => { };
+
+                // auth/start を呼ぶ
+                await fetch('/api/auth/start', { method: 'POST' });
+
+                // 認証中UIに切り替え
+                $('auth-prompt').querySelector('#btn-start-auth').style.display = 'none';
                 $('auth-waiting').style.display = 'block';
 
+                // ポーリングも保険で持つ
                 authPoll = setInterval(async () => {
                     try {
                         const r = await fetch('/api/auth/status');
                         const d = await r.json();
                         if (d.hasAuth) {
                             clearInterval(authPoll);
+                            authSse.close();
                             $('auth-waiting').style.display = 'none';
                             $('auth-done').style.display = 'block';
                             setTimeout(() => { step++; render(); }, 2000);
                         }
                     } catch (e) { }
                 }, 2000);
-            };
-
-            // Show the gemini login command (fetched from status)
-            const showAuthCommand = () => {
-                const geminiPath = state.pluginDir
-                    ? `GEMINI_CLI_HOME="${state.pluginDir}/src/.gemini" "${state.pluginDir}/node_modules/.bin/gemini" login`
-                    : 'GEMINI_CLI_HOME="./openclaw-gemini-cli-adapter/src/.gemini" "./openclaw-gemini-cli-adapter/node_modules/.bin/gemini" login';
-                const cmdEl = $('auth-cmd-text');
-                if (cmdEl) cmdEl.textContent = geminiPath;
-            };
-
-            $('btn-copy-cmd') && $('btn-copy-cmd').addEventListener('click', () => {
-                const text = $('auth-cmd-text')?.textContent || '';
-                navigator.clipboard.writeText(text).then(() => {
-                    $('btn-copy-cmd').textContent = '✅ コピーしました！';
-                    setTimeout(() => { $('btn-copy-cmd').textContent = '📋 コピー'; }, 2000);
-                });
             });
 
-            $('btn-start-poll') && $('btn-start-poll').addEventListener('click', startAuthPolling);
-
-            $('btn-skip-auth').addEventListener('click', () => {
+            $('btn-skip-auth') && $('btn-skip-auth').addEventListener('click', () => {
                 if (authPoll) clearInterval(authPoll);
                 step++;
                 render();

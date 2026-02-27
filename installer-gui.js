@@ -395,47 +395,61 @@ const server = http.createServer((req, res) => {
     // --- API: Auth Start ---
     if (req.method === 'POST' && url.pathname === '/api/auth/start') {
         const localGemini = path.join(PLUGIN_DIR, 'node_modules', '.bin', 'gemini');
-        const geminiExists = fs.existsSync(localGemini);
-        let cmd, args;
-        if (geminiExists) {
-            cmd = localGemini;
-            args = ['login'];
-        } else {
-            cmd = 'npx';
-            args = ['--yes', '@google/gemini-cli', 'login'];
+        const geminiCmd = fs.existsSync(localGemini) ? localGemini : 'gemini';
+
+        broadcastLog('Gemini CLI の認証プロセスを準備中...', 'step_start');
+
+        // [1] settings.json に oauth-personal を事前設定（認証タイプ選択UIを自動スキップ）
+        const settingsDir = path.join(GEMINI_CREDS_DIR, '.gemini');
+        const settingsPath = path.join(settingsDir, 'settings.json');
+        fs.mkdirSync(settingsDir, { recursive: true });
+
+        let geminiSettings = {};
+        try { geminiSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch (_) {}
+        if (!geminiSettings.security?.auth?.selectedType) {
+            geminiSettings.security = geminiSettings.security || {};
+            geminiSettings.security.auth = geminiSettings.security.auth || {};
+            geminiSettings.security.auth.selectedType = 'oauth-personal';
+            fs.writeFileSync(settingsPath, JSON.stringify(geminiSettings, null, 2));
+            broadcastLog('✓ 認証タイプを oauth-personal に事前設定しました', 'log');
         }
 
-        console.log(`[Auth] Starting: ${cmd} ${args.join(' ')}`);
-        console.log(`[Auth] GEMINI_CLI_HOME: ${GEMINI_CREDS_DIR}`);
-        broadcastLog('Gemini CLI の認証プロセスを開始しています...', 'step_start');
-        broadcastLog(`実行コマンド: ${cmd} ${args.join(' ')}`, 'log');
+        broadcastLog('ブラウザを自動で開いて認証ページへ誘導します...', 'log');
 
-        // GEMINI_CREDS_DIR が存在しないと gemini が ENOENT で即終了するため事前作成
-        fs.mkdirSync(GEMINI_CREDS_DIR, { recursive: true });
-        broadcastLog(`認証情報ディレクトリ: ${GEMINI_CREDS_DIR}`, 'log');
+        // [2] script コマンドで pseudo-TTY を作成して gemini login を実行
+        // (isTTY=false だと Gemini CLI がヘッドレス判定して FatalAuthenticationError を throw するため)
+        const envStr = `GEMINI_CLI_HOME='${GEMINI_CREDS_DIR}'`;
+        const scriptCmd = `script -q -f /dev/null -c '${envStr} "${geminiCmd}" login'`;
 
-        const child = spawn(cmd, args, {
+        const child = spawn('bash', ['-c', scriptCmd], {
             cwd: PLUGIN_DIR,
-            env: {
-                ...process.env,
-                GEMINI_CLI_HOME: GEMINI_CREDS_DIR,
-                TERM: 'xterm-256color',
-                COLORTERM: 'truecolor',
-            },
-            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, GEMINI_CLI_HOME: GEMINI_CREDS_DIR, TERM: 'xterm-256color' },
+            stdio: ['pipe', 'pipe', 'pipe'],
         });
 
-        // Gemini CLIの出力をブラウザのSSEログへリアルタイム配信
-        child.stdout.on('data', d => broadcastLog(d.toString().trim(), 'log'));
-        child.stderr.on('data', d => {
-            const msg = d.toString().trim();
-            if (msg) broadcastLog(msg, 'log');
-        });
+        // [3] stdout 監視で consent 質問に自動 y 応答
+        let answeredConsent = false;
+        const onData = (d) => {
+            const text = d.toString();
+            // ANSIエスケープコードを除去してブラウザへ配信
+            const clean = text.replace(/\x1B\[[0-9;]*[mGKHFJA-Z]/g, '').replace(/\r/g, '').trim();
+            if (clean) broadcastLog(clean, 'log');
+
+            // 同意プロンプト自動応答
+            if (!answeredConsent && (text.includes('Do you want to continue') || text.includes('[Y/n]') || text.includes('続けますか'))) {
+                answeredConsent = true;
+                broadcastLog('→ 同意確認を検出。自動で "y" を送信します', 'log');
+                setTimeout(() => { try { child.stdin.write('y\n'); } catch (_) {} }, 200);
+            }
+        };
+
+        child.stdout.on('data', onData);
+        child.stderr.on('data', onData);
 
         child.on('close', (code) => {
             console.log(`[Auth] gemini login exited with code ${code}`);
             if (!hasValidCredentials()) {
-                broadcastLog(`gemini login が終了しました (exit code: ${code})`, 'warning');
+                broadcastLog(`gemini login が終了しました (exit code: ${code})`, code === 0 ? 'log' : 'warning');
             }
         });
 
@@ -444,6 +458,7 @@ const server = http.createServer((req, res) => {
             broadcastLog(`認証プロセスの起動に失敗: ${err.message}`, 'step_error');
         });
 
+        // [4] 認証完了ポーリング → SSE で完了通知
         let killed = false;
         const poll = setInterval(() => {
             if (hasValidCredentials() && !killed) {
