@@ -117,7 +117,12 @@ fi
 # ==============================================================================
 echo ""
 echo "$MSG_SETUP_START"
-export SETUP_LANG="$lang_choice"
+# Convert number to language code for setup.js
+case "$lang_choice" in
+    2) export SETUP_LANG="ja" ;;
+    3) export SETUP_LANG="zh" ;;
+    *) export SETUP_LANG="en" ;;
+esac
 if command -v bun >/dev/null 2>&1; then
     bun setup.js
 else

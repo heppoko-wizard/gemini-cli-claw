@@ -16,7 +16,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "@google/gemini-cli": "^0.29.7",
+    "@google/gemini-cli": "*",
     "@modelcontextprotocol/sdk": "^1.26.0"
   }
 }
