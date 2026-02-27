@@ -54,6 +54,10 @@ const MSG = {
         syncSuccess: "✓ モデルの同期完了",
         registerAdapter: "openclaw.json に gemini-adapter を登録しています...",
         registerAdapterSuccess: "✓ gemini-adapter の登録完了",
+        askPrimaryModel: "Gemini アダプタを OpenClaw のデフォルト（primary）に設定しますか？ (Y/n): ",
+        primaryModelSuccess: "✓ プライマリモデルとして設定しました。",
+        skipPrimaryModel: "ℹ️ 設定をスキップしました。後で手動で行う場合は ~/.openclaw/openclaw.json を編集してください。",
+
         checkAuth: "Gemini CLI の認証状況をチェックしています...",
         authNotice: `
 -------------------------------------------------
@@ -152,6 +156,10 @@ const MSG = {
         syncSuccess: "✓ Models synced",
         registerAdapter: "Registering gemini-adapter in openclaw.json...",
         registerAdapterSuccess: "✓ gemini-adapter registered",
+        askPrimaryModel: "Set Gemini Adapter as the default (primary) model in OpenClaw? (Y/n): ",
+        primaryModelSuccess: "✓ Set as primary model.",
+        skipPrimaryModel: "ℹ️ Skipped. You can manually edit ~/.openclaw/openclaw.json later if needed.",
+
         checkAuth: "Checking Gemini CLI authentication...",
         authNotice: `
 -------------------------------------------------
@@ -252,6 +260,10 @@ This installer will configure the following:
         syncSuccess: "✓ 模型同步完成",
         registerAdapter: "正在 openclaw.json 中注册 gemini-adapter...",
         registerAdapterSuccess: "✓ gemini-adapter 注册完成",
+        askPrimaryModel: "是否将 Gemini 适配器设置为 OpenClaw 的默认 (primary) 模型？ (Y/n): ",
+        primaryModelSuccess: "✓ 已设置为主要模型。",
+        skipPrimaryModel: "ℹ️ 已跳过。如果需要，稍后您可以手动编辑 ~/.openclaw/openclaw.json。",
+
         checkAuth: "正在检查 Gemini CLI 的身份验证状态...",
         authNotice: `
 -------------------------------------------------
@@ -554,14 +566,23 @@ async function main() {
     }
 
     if (!config.models) config.models = {};
-    config.models.primary = "gemini-adapter/auto-gemini-3";
+    
+    const setPrimary = await question(L.askPrimaryModel);
+    if (setPrimary.trim() === '' || setPrimary.trim().toLowerCase() === 'y') {
+        config.models.primary = "gemini-adapter/auto-gemini-3";
+    }
 
     try {
         fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2), "utf-8");
-        console.log(L.registerAdapterSuccess + "\n");
+        if (config.models.primary === "gemini-adapter/auto-gemini-3") {
+            console.log(L.primaryModelSuccess + "\n");
+        } else {
+            console.log(L.skipPrimaryModel + "\n");
+        }
     } catch (e) {
         console.error("Error writing openclaw.json:", e);
     }
+
 
     // 4. Gemini CLI Authentication
     console.log("[4/4] " + L.checkAuth);
