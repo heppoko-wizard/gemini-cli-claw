@@ -293,6 +293,22 @@ fi
 # ==============================================================================
 # Launch Setup
 # ==============================================================================
+if [ -f "setup.js" ]; then
+    SETUP_SCRIPT="setup.js"
+elif [ -f "openclaw-gemini-cli-adapter/setup.js" ]; then
+    SETUP_SCRIPT="openclaw-gemini-cli-adapter/setup.js"
+else
+    SETUP_SCRIPT="setup.js"
+fi
+
+if [ -f "installer-gui.js" ]; then
+    GUI_SCRIPT="installer-gui.js"
+elif [ -f "openclaw-gemini-cli-adapter/installer-gui.js" ]; then
+    GUI_SCRIPT="openclaw-gemini-cli-adapter/installer-gui.js"
+else
+    GUI_SCRIPT="installer-gui.js"
+fi
+
 if [ "$USE_CLI" = true ]; then
     if ! command -v bun >/dev/null 2>&1; then
         echo "$MSG_BUN_OFFER"
@@ -312,13 +328,13 @@ if [ "$USE_CLI" = true ]; then
     export SETUP_LANG="$LANG_CODE"
     export SETUP_SKIP_INTRO="1"
     if command -v bun >/dev/null 2>&1; then
-        bun setup.js
+        bun "$SETUP_SCRIPT"
     else
-        node setup.js
+        node "$SETUP_SCRIPT"
     fi
 else
     # GUI Mode: launch installer-gui.js
     echo "Starting GUI Installer Server..."
-    chmod +x installer-gui.js 2>/dev/null || true
-    node installer-gui.js
+    chmod +x "$GUI_SCRIPT" 2>/dev/null || true
+    node "$GUI_SCRIPT"
 fi

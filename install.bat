@@ -1,5 +1,10 @@
 @echo off
+setlocal EnableDelayedExpansion
 chcp 65001 >nul
+
+set USE_CLI=false
+if "%~1"=="--cli" set USE_CLI=true
+
 echo =================================================
 echo  OpenClaw Gemini Gateway Automated Installer
 echo =================================================
@@ -21,9 +26,21 @@ if %errorlevel% neq 0 (
     exit /b 1
 ) else (
     for /f "tokens=*" %%v in ('node -v') do set NODE_VER=%%v
-    echo ✓ Node.js は既にインストールされています: %NODE_VER%
+    echo ✓ Node.js は既にインストールされています: !NODE_VER!
 )
 
-echo バックエンドのセットアップを開始します...
-node setup.js
+echo.
+set SETUP_SCRIPT=setup.js
+if exist "openclaw-gemini-cli-adapter\setup.js" set SETUP_SCRIPT=openclaw-gemini-cli-adapter\setup.js
+
+set GUI_SCRIPT=installer-gui.js
+if exist "openclaw-gemini-cli-adapter\installer-gui.js" set GUI_SCRIPT=openclaw-gemini-cli-adapter\installer-gui.js
+
+if "%USE_CLI%"=="true" (
+    echo CLIモードでバックエンドのセットアップを開始します...
+    node %SETUP_SCRIPT%
+) else (
+    echo Starting GUI Installer Server...
+    node %GUI_SCRIPT%
+)
 pause
