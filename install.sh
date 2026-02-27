@@ -45,9 +45,13 @@ if [ "$LANG_CODE" = "ja" ]; then
          ↓ サブプロセス
     Gemini CLI → Google Gemini API（クラウド）
 
-  【認証について】
-    Gemini API の認証情報はこのアダプタフォルダ内（src/.gemini）に
-    隔離して保存されます。既存の Gemini CLI 設定には影響しません。"
+  【Gemini CLI の専用インストールと認証について】
+    このアダプタで使用する Gemini CLI は、このフォルダ内（src/.gemini）に
+    「OpenClaw 専用」として完全に独立してインストールされます。
+
+    そのため、すでにPC本体に Gemini CLI がインストールされている場合でも、
+    設定や認証情報が同期・共有されることはありません。
+    （※ここでログインしても、本体側の Gemini CLI には影響しません）"
 
     MSG_WARN_HEADER="⚠  重要な注意事項 ⚠"
     MSG_WARN_BODY="
@@ -103,9 +107,13 @@ elif [ "$LANG_CODE" = "zh" ]; then
          ↓ 子进程
     Gemini CLI → Google Gemini API（云端）
 
-  【关于认证】
-    Gemini API 认证信息保存在适配器文件夹内（src/.gemini），
-    不会影响您现有的 Gemini CLI 设置。"
+  【Gemini CLI 的专用安装与认证】
+    此适配器使用的 Gemini CLI 将完全独立地安装在此文件夹内（src/.gemini），
+    作为「OpenClaw 专用」环境。
+
+    因此，即使您的电脑上已经安装了 Gemini CLI，
+    其设置和认证信息也不会同步或共享。
+    （※在此处登录不会影响您系统上的 Gemini CLI）"
 
     MSG_WARN_HEADER="⚠  重要注意事项 ⚠"
     MSG_WARN_BODY="
@@ -161,10 +169,13 @@ else  # English
          ↓ Subprocess
     Gemini CLI → Google Gemini API (Cloud)
 
-  [About authentication]
-    Gemini API credentials are stored inside the adapter folder
-    (src/.gemini) in isolation. Your existing Gemini CLI settings
-    are not affected."
+  [Dedicated Installation & Authentication]
+    The Gemini CLI used by this adapter will be installed completely independently
+    inside this folder (src/.gemini) as a 'dedicated environment for OpenClaw'.
+
+    Therefore, even if Gemini CLI is already installed on your system,
+    settings and credentials will NOT be synchronized or shared.
+    (*Logging in here will not affect the Gemini CLI on your system)"
 
     MSG_WARN_HEADER="⚠  Important Notices ⚠"
     MSG_WARN_BODY="

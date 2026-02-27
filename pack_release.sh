@@ -64,6 +64,8 @@ find "$STAGE_ADAPTER" -name "installation_id" -delete 2>/dev/null || true
 
 # --- 4. Finalizing ---
 echo "Creating release folder: $OUTPUT_DIR/openclaw"
+# Ensure we can delete the previous folder
+chmod -R u+w "$OUTPUT_DIR/openclaw" 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/openclaw"
 cp -r "$STAGE_ROOT" "$OUTPUT_DIR/openclaw"
 
