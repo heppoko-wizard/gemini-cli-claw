@@ -508,9 +508,22 @@ const server = http.createServer((req, res) => {
 // ============================================================
 server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-        console.error(`[Error] Port ${PORT} is already in use. Please run: kill $(lsof -t -i :${PORT})`);
+        console.error('\n================================================================');
+        console.error(`[エラー] インストーラーの起動に失敗しました（ポート ${PORT} が使用中です）`);
+        console.error('================================================================');
+        console.error('すでに別のインストーラーがバックグラウンドで起動しているか、');
+        console.error('二重に実行しようとした可能性があります。');
+        console.error('');
+        console.error('【解決方法】');
+        console.error('1. 現在開いているすべてのインストーラーのブラウザタブを閉じてください。');
+        console.error('2. 開いている他のターミナルウィンドウがあれば閉じてください。');
+        console.error(`3. それでも解決しない場合はコマンド「 kill $(lsof -t -i :${PORT}) 」でプロセスを強制終了してください。`);
+        console.error('4. その後、もう一度 setup.js を実行してください。');
+        console.error('================================================================\n');
     } else {
-        console.error('[Error]', err.message);
+        console.error('\n================================================================');
+        console.error('[エラー] 予期せぬエラーが発生しました:', err.message);
+        console.error('================================================================\n');
     }
     process.exit(1);
 });
