@@ -325,7 +325,7 @@ function buildOpenclaw(cwd) {
 }
 
 async function main() {
-    // 0. Language selection (Detection & Choice)
+    // 0. Language selection (from install.sh via SETUP_LANG env var)
     const envSetupLang = process.env.SETUP_LANG;
     const envLang = (process.env.LANG || "").toLowerCase();
     
@@ -333,8 +333,8 @@ async function main() {
         if (envSetupLang === 'ja') L = MSG.ja;
         else if (envSetupLang === 'zh') L = MSG.zh;
         else L = MSG.en;
-        console.log(`Language set to: ${envSetupLang === 'ja' ? '日本語' : (envSetupLang === 'zh' ? '简体中文' : 'English')}`);
     } else {
+        // Fallback: auto-detect from system locale, or ask interactively
         if (envLang.startsWith("ja")) {
             L = MSG.ja;
         } else if (envLang.startsWith("zh")) {
@@ -355,13 +355,13 @@ async function main() {
     console.log("\n" + L.welcome);
     console.log("=================================================\n");
 
-    // --- Show intro description (what gets installed, architecture overview) ---
-    console.log(L.intro);
-    console.log("");
-
-    // --- Show YOLO mode / Beta warning ---
-    console.log(L.warning);
-    console.log("");
+    // --- Show intro & warning only if NOT already shown by install.sh ---
+    if (!process.env.SETUP_SKIP_INTRO) {
+        console.log(L.intro);
+        console.log("");
+        console.log(L.warning);
+        console.log("");
+    }
 
     console.log("[1/4] " + L.checkOpenclaw);
     let openclawNeedsBuild = false;
