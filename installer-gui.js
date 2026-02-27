@@ -55,7 +55,7 @@ function hasValidCredentials() {
             const data = JSON.parse(raw);
             if (data.refresh_token || data.access_token) return true;
             if (data.active !== undefined && data.active !== null) return true;
-        } catch (e) {}
+        } catch (e) { }
     }
     return false;
 }
@@ -86,7 +86,7 @@ let logClients = [];
 function broadcastLog(message, type = 'log') {
     const data = `data: ${JSON.stringify({ type, message })}\n\n`;
     logClients.forEach(c => {
-        try { c.write(data); } catch(e) {}
+        try { c.write(data); } catch (e) { }
     });
     console.log(`[GUI] ${message}`);
 }
@@ -169,7 +169,7 @@ async function downloadOpenClaw() {
                 SCRIPT_DIR,
                 'ZIP 展開'
             );
-            try { fs.rmSync(zipPath); } catch (_) {}
+            try { fs.rmSync(zipPath); } catch (_) { }
 
             if (unzipOk) {
                 try {
@@ -245,7 +245,11 @@ async function runSetup(setPrimary) {
                 await runCmd('npm install -g pnpm', OPENCLAW_ROOT, 'pnpm インストール');
             }
             const buildOk = await runCmd('npm run build', OPENCLAW_ROOT, 'OpenClaw ビルド');
-            if (!buildOk) success = false;
+            if (buildOk) {
+                await runCmd('npm run ui:build', OPENCLAW_ROOT, 'OpenClaw UI ビルド');
+            } else {
+                success = false;
+            }
         }
     } else {
         broadcastLog('✓ OpenClaw 本体を確認しました', 'step_done');
@@ -257,7 +261,11 @@ async function runSetup(setPrimary) {
                 await runCmd('npm install -g pnpm', OPENCLAW_ROOT, 'pnpm インストール');
             }
             const buildOk = await runCmd('npm run build', OPENCLAW_ROOT, 'OpenClaw ビルド');
-            if (!buildOk) success = false;
+            if (buildOk) {
+                await runCmd('npm run ui:build', OPENCLAW_ROOT, 'OpenClaw UI ビルド');
+            } else {
+                success = false;
+            }
         } else {
             broadcastLog('✓ OpenClaw ビルド済み (スキップ)', 'step_done');
         }
@@ -347,7 +355,7 @@ const server = http.createServer((req, res) => {
     const parseBody = () => new Promise(resolve => {
         let body = '';
         req.on('data', c => { body += c; });
-        req.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve({}); } });
+        req.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { resolve({}); } });
     });
 
     // --- Static files ---
@@ -405,7 +413,7 @@ const server = http.createServer((req, res) => {
         fs.mkdirSync(settingsDir, { recursive: true });
 
         let geminiSettings = {};
-        try { geminiSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch (_) {}
+        try { geminiSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch (_) { }
         if (!geminiSettings.security?.auth?.selectedType) {
             geminiSettings.security = geminiSettings.security || {};
             geminiSettings.security.auth = geminiSettings.security.auth || {};
@@ -439,7 +447,7 @@ const server = http.createServer((req, res) => {
             if (!answeredConsent && (text.includes('Do you want to continue') || text.includes('[Y/n]') || text.includes('続けますか'))) {
                 answeredConsent = true;
                 broadcastLog('→ 同意確認を検出。自動で "y" を送信します', 'log');
-                setTimeout(() => { try { child.stdin.write('y\n'); } catch (_) {} }, 200);
+                setTimeout(() => { try { child.stdin.write('y\n'); } catch (_) { } }, 200);
             }
         };
 
@@ -471,7 +479,7 @@ const server = http.createServer((req, res) => {
                 const port = req.socket.localPort || req.socket.server.address().port;
                 spawn(startCmd, [`http://127.0.0.1:${port}`], { detached: true, stdio: 'ignore' }).unref();
 
-                setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} }, 1500);
+                setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) { } }, 1500);
             }
         }, 2000);
 
