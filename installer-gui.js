@@ -458,13 +458,19 @@ const server = http.createServer((req, res) => {
             broadcastLog(`認証プロセスの起動に失敗: ${err.message}`, 'step_error');
         });
 
-        // [4] 認証完了ポーリング → SSE で完了通知
+        // [4] 認証完了ポーリング → SSE で完了通知と新しいタブを開く
         let killed = false;
         const poll = setInterval(() => {
             if (hasValidCredentials() && !killed) {
                 killed = true;
                 clearInterval(poll);
-                broadcastLog('✓ 認証が完了しました！自動的に次へ進みます...', 'step_done');
+                broadcastLog('✓ 認証が完了しました！新しいタブで完了画面を開きます...', 'step_done');
+
+                // 認証完了時に、ユーザーが元のタブを探す手間を省くため強制的に新しいタブを開く
+                const startCmd = process.platform === 'win32' ? 'start' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+                const port = req.socket.localPort || req.socket.server.address().port;
+                spawn(startCmd, [`http://127.0.0.1:${port}`], { detached: true, stdio: 'ignore' }).unref();
+
                 setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} }, 1500);
             }
         }, 2000);

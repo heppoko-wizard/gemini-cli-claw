@@ -579,6 +579,11 @@
             render();
             await fetchStatus();
 
+            // すべての設定が完了している状態で開かれた場合は、自動的に完了画面を表示する
+            if (state.isOpenClawPresent && state.isBuilt && state.hasAuth) {
+                step = TOTAL;
+                render();
+            }
         })();
     </script>
 </body>
