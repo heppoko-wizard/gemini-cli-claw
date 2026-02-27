@@ -36,6 +36,11 @@ if [ "$LANG_CODE" = "ja" ]; then
      - OpenClaw から Gemini CLI へのリクエストを仲介
      - プロセス: Node.js、ポート 3972
 
+  3. Gemini CLI（Google 製 AI コマンドラインツール）
+     - アダプタが内部で呼び出す AI エンジン本体
+     - OpenClaw 専用として このフォルダ内（src/.gemini）に隔離インストール
+     - インストール先: $(pwd)/openclaw-gemini-cli-adapter/src/.gemini
+
   【起動後の構成イメージ】
     あなた（Telegram）
          ↓
@@ -98,6 +103,10 @@ elif [ "$LANG_CODE" = "zh" ]; then
      - 在 OpenClaw 和 Gemini CLI 之间中介请求
      - 进程: Node.js，端口 3972
 
+  3. Gemini CLI（Google AI 命令行工具）
+     - 适配器内部调用的 AI 引擎
+     - 作为 OpenClaw 专用环境，独立安装在此文件夹内（src/.gemini）
+
   【启动后的架构】
     您（Telegram）
          ↓
@@ -159,6 +168,10 @@ else  # English
   2. Gemini CLI Adapter (this tool)
      - Mediates requests between OpenClaw and Gemini CLI
      - Process: Node.js, port 3972
+
+  3. Gemini CLI (Google AI Command-Line Tool)
+     - The AI engine invoked internally by the adapter
+     - Installed in isolation as a dedicated OpenClaw environment (src/.gemini)
 
   [Architecture after setup]
     You (Telegram)

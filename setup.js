@@ -55,7 +55,19 @@ const MSG = {
         registerAdapter: "openclaw.json に gemini-adapter を登録しています...",
         registerAdapterSuccess: "✓ gemini-adapter の登録完了",
         checkAuth: "Gemini CLI の認証状況をチェックしています...",
-        authNeeded: "Gemini API の認証が見つかりません。今すぐログインしますか？ (Y/n): ",
+        authNotice: `
+-------------------------------------------------
+🔑 Gemini CLI 認証について
+-------------------------------------------------
+  ここでの認証は OpenClaw 専用の Gemini CLI に対して行われます。
+  インストール先: このフォルダ内の src/.gemini
+
+  ✓ PC に既に Gemini CLI がインストールされていても影響しません。
+  ✓ 設定・認証情報は一切共有されません。
+  ✓ 認証後は Gemini CLI の TUI が自動終了します。
+-------------------------------------------------`,
+        authNeeded: "認証が見つかりません。このまま Gemini アカウントでログインしますか？ (Y/n): ",
+
         authStart: "認証を開始します。ターミナルに表示される指示に従ってログインしてください...",
         authSuccess: "✓ Gemini 認証完了",
         authMissingTip: "情報: 認証資格情報がまだ見つかりません。後で手動で `npx @google/gemini-cli login` を実行する必要があるかもしれません。",
@@ -138,7 +150,19 @@ const MSG = {
         registerAdapter: "Registering gemini-adapter in openclaw.json...",
         registerAdapterSuccess: "✓ gemini-adapter registered",
         checkAuth: "Checking Gemini CLI authentication...",
-        authNeeded: "Gemini API authentication not found. Login now? (Y/n): ",
+        authNotice: `
+-------------------------------------------------
+🔑 About Gemini CLI Authentication
+-------------------------------------------------
+  This authentication is for the OpenClaw-dedicated Gemini CLI.
+  Install location: src/.gemini inside this folder
+
+  ✓ Will not affect any existing Gemini CLI on your system.
+  ✓ Settings and credentials are NOT shared.
+  ✓ Gemini CLI TUI will auto-exit after successful login.
+-------------------------------------------------`,
+        authNeeded: "Authentication not found. Log in with your Google account now? (Y/n): ",
+
         authStart: "Starting authentication. Please follow the instructions to login...",
         authSuccess: "✓ Gemini authentication complete",
         authMissingTip: "Info: Authentication credentials still not found. You may need to manually run `npx @google/gemini-cli login` later.",
@@ -223,7 +247,19 @@ This installer will configure the following:
         registerAdapter: "正在 openclaw.json 中注册 gemini-adapter...",
         registerAdapterSuccess: "✓ gemini-adapter 注册完成",
         checkAuth: "正在检查 Gemini CLI 的身份验证状态...",
-        authNeeded: "未发现 Gemini API 身份验证。现在登录吗？ (Y/n): ",
+        authNotice: `
+-------------------------------------------------
+🔑 关于 Gemini CLI 认证
+-------------------------------------------------
+  此处的认证针对 OpenClaw 专用的 Gemini CLI。
+  安装位置：此文件夹内的 src/.gemini
+
+  ✓ 不会影响系统上现有的 Gemini CLI。
+  ✓ 设置和认证信息不会共享。
+  ✓ 认证成功后，Gemini CLI TUI 将自动退出。
+-------------------------------------------------`,
+        authNeeded: "未发现身份验证。现在使用 Google 账号登录吗？ (Y/n): ",
+
         authStart: "开始身份验证。请按照终端显示的说明进行登录...",
         authSuccess: "✓ Gemini 身份验证完成",
         authMissingTip: "提示：仍未发现身份验证凭据。您稍后可能需要手动运行 `npx @google/gemini-cli login`。",
@@ -525,62 +561,70 @@ async function main() {
     const credsPath2 = path.join(GEMINI_CREDS_DIR, "google_accounts.json");
     
     if (!fs.existsSync(credsPath1) && !fs.existsSync(credsPath2)) {
-        console.log(L.authStart);
+        // Show notice about dedicated/isolated Gemini CLI before prompting
+        console.log(L.authNotice);
+        const doLogin = await question(L.authNeeded);
+        if (doLogin.trim() === '' || doLogin.trim().toLowerCase() === 'y') {
+            console.log(L.authStart);
         
-        // Prefer the locally installed gemini CLI in openclaw-gemini-cli-adapter, fallback to npx
-        const localGeminiPath = path.join(PLUGIN_DIR, "node_modules", ".bin", "gemini");
-        const commandToRun = fs.existsSync(localGeminiPath) ? localGeminiPath : "npx gemini";
-        
-        // IMPORTANT: Close readline BEFORE running gemini login.
-        // If rl is open, it holds stdin and the gemini login subprocess
-        // cannot receive the auth code pasted by the user.
-        rl.close();
-
-        // Open browser automatically if possible.
-        // We've already closed readline above, so the terminal is ready for the auth code.
-        await new Promise((resolve) => {
-            const { spawn } = require('child_process');
-            const cmdParts = commandToRun.split(' ');
+            // Prefer the locally installed gemini CLI in openclaw-gemini-cli-adapter, fallback to npx
+            const localGeminiPath = path.join(PLUGIN_DIR, "node_modules", ".bin", "gemini");
+            const commandToRun = fs.existsSync(localGeminiPath) ? localGeminiPath : "npx gemini";
             
-            console.log("\n[Gemini TUI Start] Please follow the authentication flow (browser may open).");
-            console.log("When authentication is successful, this installer will detect it and proceed automatically!");
-            console.log("-----------------------------------------");
-            
-            const child = spawn(cmdParts[0], cmdParts.slice(1).concat(['login']), {
-                cwd: PLUGIN_DIR,
-                env: { ...process.env, GEMINI_CLI_HOME: GEMINI_CREDS_DIR },
-                stdio: 'inherit'
-            });
+            // IMPORTANT: Close readline BEFORE running gemini login.
+            // If rl is open, it holds stdin and the gemini login subprocess
+            // cannot receive the auth code pasted by the user.
+            rl.close();
 
-            // Poll for the credentials file. If it exists, login succeeded.
-            const checkInterval = setInterval(() => {
-                if (fs.existsSync(credsPath1) || fs.existsSync(credsPath2)) {
-                    clearInterval(checkInterval);
-                    console.log("\n-----------------------------------------");
-                    console.log("Auth credentials detected. Auto-exiting Gemini CLI...");
-                    setTimeout(() => {
-                        child.kill('SIGINT');
+            // Open browser automatically if possible.
+            // We've already closed readline above, so the terminal is ready for the auth code.
+            await new Promise((resolve) => {
+                const { spawn } = require('child_process');
+                const cmdParts = commandToRun.split(' ');
+                
+                console.log("\n[Gemini TUI Start] Please follow the authentication flow (browser may open).");
+                console.log("When authentication is successful, this installer will detect it and proceed automatically!");
+                console.log("-----------------------------------------");
+                
+                const child = spawn(cmdParts[0], cmdParts.slice(1).concat(['login']), {
+                    cwd: PLUGIN_DIR,
+                    env: { ...process.env, GEMINI_CLI_HOME: GEMINI_CREDS_DIR },
+                    stdio: 'inherit'
+                });
+
+                // Poll for the credentials file. If it exists, login succeeded.
+                const checkInterval = setInterval(() => {
+                    if (fs.existsSync(credsPath1) || fs.existsSync(credsPath2)) {
+                        clearInterval(checkInterval);
+                        console.log("\n-----------------------------------------");
+                        console.log("Auth credentials detected. Auto-exiting Gemini CLI...");
                         setTimeout(() => {
-                            try { child.kill('SIGKILL'); } catch (e) {}
-                        }, 1000);
-                        resolve();
-                    }, 500); // Give CLI a moment to write everything safely
-                }
-            }, 1000);
+                            child.kill('SIGINT');
+                            setTimeout(() => {
+                                try { child.kill('SIGKILL'); } catch (e) {}
+                            }, 1000);
+                            resolve();
+                        }, 500); // Give CLI a moment to write everything safely
+                    }
+                }, 1000);
 
-            child.on('close', () => {
-                clearInterval(checkInterval);
-                resolve();
+                child.on('close', () => {
+                    clearInterval(checkInterval);
+                    resolve();
+                });
             });
-        });        
-        if (fs.existsSync(credsPath1) || fs.existsSync(credsPath2)) {
-            console.log(L.authSuccess + "\n");
+            if (fs.existsSync(credsPath1) || fs.existsSync(credsPath2)) {
+                console.log(L.authSuccess + "\n");
+            } else {
+                console.log(L.authMissingTip + "\n");
+            }
         } else {
             console.log(L.authMissingTip + "\n");
         }
     } else {
         console.log(L.authSuccess + " (Skipped / 読込済)\n");
     }
+
 
     console.log("=================================================");
     console.log(L.finish);
