@@ -41,7 +41,7 @@ This script fully automates environment checks, cloning/building OpenClaw, adapt
 
 **If you are already using OpenClaw (Already installed):**
 Make sure to move this downloaded `openclaw-gemini-cli-adapter` folder **directly under** your existing `openclaw` folder before running the installation script.
-(Example placement: `openclaw/openclaw-gemini-cli-adapter/install.bat`)
+(Example placement: `openclaw/openclaw-gemini-cli-adapter/install-adapter.bat`)
 
 **If this is your very first time installing OpenClaw:**
 Run the following script in any folder, and the installer will automatically download (git clone) and build OpenClaw.
@@ -49,14 +49,14 @@ Run the following script in any folder, and the installer will automatically dow
 **Linux / macOS:**
 ```bash
 # Move to this repository folder and run:
-chmod +x install.sh
-./install.sh
+chmod +x install-adapter.sh
+./install-adapter.sh
 ```
 
 **Windows:**
-Double-click `install.bat` inside this folder from Explorer, or run the following in Command Prompt:
+Double-click `install-adapter.bat` inside this folder from Explorer, or run the following in Command Prompt:
 ```cmd
-install.bat
+install-adapter.bat
 ```
 
 ## Usage
@@ -64,12 +64,44 @@ install.bat
 In your OpenClaw settings (`openclaw.json`), switch your main inference engine to the Gemini adapter.
 
 ```json
-"models": {
-  "primary": "gemini-adapter/default"
+"agents": {
+  "defaults": {
+    "model": "gemini-adapter/auto-gemini-3"
+  }
 }
 ```
 
 After configuration, simply send a message as usual from the OpenClaw CLI or Telegram/Discord interface, and the Gemini CLI will boot in the backend to return a response.
+
+There are two ways to start the system: a convenient all-in-one launch or manual individual startup.
+
+### A. All-in-one Launch (Recommended)
+We provide a script that automatically starts the OpenClaw Gateway, the Gemini adapter, and the control dashboard all at once.
+
+| Environment | Script to Run |
+|---|---|
+| **Windows** | Double-click `launch.bat` (or run in Command Prompt) |
+| **macOS / Linux** | Run `./launch.sh` in the terminal |
+
+Upon execution, the system will start in the background, and the control UI (dashboard) will automatically open in your browser.
+
+### B. Manual Startup
+If you prefer to start the processes manually to monitor their operation via the command line, please launch the two processes in the following order:
+
+1. **Start the Gemini Adapter** (Port: 3972)
+```bash
+./start.sh
+```
+
+2. **Start OpenClaw (Gateway)** (Port: 18789)
+Open a new terminal and run the following in the OpenClaw root directory (`openclaw/`):
+```bash
+npm run start
+```
+
+## GUI Configuration (Dashboard)
+While the OpenClaw Gateway is running, you can configure models by opening the control UI from your browser.
+(* Note: It opens automatically if you use the `launch.sh/bat` script.)
 
 ## Architecture
 
@@ -108,6 +140,6 @@ Major planned updates include:
 
 To remove this adapter and return to your original OpenClaw state, follow these steps:
 
-1. Open `~/.openclaw/openclaw.json` and revert `models.primary` to its original value (e.g., `anthropic-messages/claude-sonnet-4-6`).
-2. Delete the `"gemini-adapter"` block that was added to `cliBackends` in `openclaw.json`.
+1. Open `~/.openclaw/openclaw.json` and revert `agents.defaults.model` to its original value (e.g., `anthropic-messages/claude-sonnet-3-5`).
+2. Delete the `"gemini-adapter"` block that was added to `models.providers` in `openclaw.json`.
 3. Delete the repository folder (`openclaw-gemini-cli-adapter`). This leaves zero impact on your global system state and uninstalls the adapter cleanly.

@@ -33,7 +33,7 @@ if (BASENAME === 'openclaw-gemini-cli-adapter' || BASENAME === 'gemini-cli-claw'
 
 const PUBLIC_DIR = path.join(PLUGIN_DIR, 'public');
 const OPENCLAW_CONFIG = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-const GEMINI_CREDS_DIR = path.join(PLUGIN_DIR, 'src', '.gemini');
+const GEMINI_CREDS_DIR = path.join(PLUGIN_DIR, 'gemini-home');
 const PORT = 19872;
 
 // ============================================================

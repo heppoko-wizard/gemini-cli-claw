@@ -9,13 +9,20 @@
 
 set -euo pipefail
 
+# Node.jsパスの解決 (非対話シェルから実行されたときのため)
+export PATH="/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$PATH"
+if ! command -v node >/dev/null 2>&1; then
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && set +u && \. "$NVM_DIR/nvm.sh" && set -u || true
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${GEMINI_ADAPTER_PORT:-3972}"
 LOG_FILE="${SCRIPT_DIR}/logs/adapter.log"
 PID_FILE="${SCRIPT_DIR}/logs/adapter.pid"
 
-# Gemini CLI のホームディレクトリをプラグインローカル（src/.gemini）に設定
-export GEMINI_CLI_HOME="${SCRIPT_DIR}/src/.gemini"
+# Gemini CLI のホームディレクトリをプラグインローカル（gemini-home）に設定
+export GEMINI_CLI_HOME="${SCRIPT_DIR}/gemini-home"
 
 # ランタイム選択: server.js は必ず Node.js を使用
 # Bun の HTTP サーバーは req.on('close') が TCP 切断ではなく body 消費完了で発火するため、
@@ -24,7 +31,7 @@ export GEMINI_CLI_HOME="${SCRIPT_DIR}/src/.gemini"
 RUNTIME="node"
 echo "[start.sh] Using Node.js runtime ($(node --version)) for server.js"
 
-# 既に起動中か確認
+# 既に起動中か確認 (PID)
 if [[ -f "$PID_FILE" ]]; then
     OLD_PID=$(cat "$PID_FILE")
     if kill -0 "$OLD_PID" 2>/dev/null; then
@@ -34,6 +41,12 @@ if [[ -f "$PID_FILE" ]]; then
         echo "[start.sh] Removing stale PID file"
         rm -f "$PID_FILE"
     fi
+fi
+
+# ポートの競合確認 (ゾンビプロセス等)
+if nc -z localhost "$PORT" 2>/dev/null || lsof -i :"$PORT" >/dev/null 2>&1; then
+    echo "[start.sh] Port $PORT is already in use by another process. Assuming adapter is already running."
+    exit 0
 fi
 
 echo "[start.sh] Syncing models to OpenClaw config..."

@@ -20,7 +20,7 @@ if %errorlevel% neq 0 (
     echo ✓ Node.js のインストールプロセスが完了しました。
     echo 環境変数（PATH）をシステムに反映させるため、
     echo 一度このターミナルウィンドウを閉じて、新しく開き直してから
-    echo 再度 install.bat を実行してください。
+    echo 再度 install-adapter.bat を実行してください。
     echo -------------------------------------------------
     pause
     exit /b 1

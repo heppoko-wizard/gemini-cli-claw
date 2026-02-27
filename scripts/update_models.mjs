@@ -65,6 +65,9 @@ try {
 
     // 1. Update models.providers.gemini-adapter.models
     if (!config.models) config.models = {};
+    if (config.models && 'primary' in config.models) {
+        delete config.models.primary; // Force clean up old schema key
+    }
     if (!config.models.providers) config.models.providers = {};
     if (!config.models.providers['gemini-adapter']) {
         config.models.providers['gemini-adapter'] = {

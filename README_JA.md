@@ -48,7 +48,7 @@ Gemini CLI そのものに「自立駆動型エージェント」としての側
 
 **既にOpenClawをご利用中（インストール済み）の方:**
 必ず、ダウンロードしたこの `openclaw-gemini-cli-adapter` フォルダごと、既存の `openclaw` フォルダの**直下**に移動させてからインストールスクリプトを実行してください。
-（配置例: `openclaw/openclaw-gemini-cli-adapter/install.bat` となるように配置する）
+（配置例: `openclaw/openclaw-gemini-cli-adapter/install-adapter.bat` となるように配置する）
 
 **まだOpenClawを導入していない一番最初の方:**
 任意のフォルダで以下のスクリプトを実行すれば、インストーラーが自動的にOpenClaw本体をダウンロード(git clone)して構築まで行います。
@@ -56,14 +56,14 @@ Gemini CLI そのものに「自立駆動型エージェント」としての側
 **Linux / macOS:**
 ```bash
 # このリポジトリフォルダに移動して以下を実行
-chmod +x install.sh
-./install.sh
+chmod +x install-adapter.sh
+./install-adapter.sh
 ```
 
 **Windows:**
-エクスプローラーからこのフォルダ内の `install.bat` をダブルクリックするか、コマンドプロンプトで以下を実行してください。
+エクスプローラーからこのフォルダ内の `install-adapter.bat` をダブルクリックするか、コマンドプロンプトで以下を実行してください。
 ```cmd
-install.bat
+install-adapter.bat
 ```
 
 ## 使い方
@@ -71,12 +71,42 @@ install.bat
 OpenClawの設定 (`openclaw.json`) にて、メインの推論エンジンをGeminiアダプタに切り替えて使用します。
 
 ```json
-"models": {
-  "primary": "gemini-adapter/default"
+"agents": {
+  "defaults": {
+    "model": "gemini-adapter/auto-gemini-3"
+  }
 }
 ```
 
-設定後、通常通りOpenClawのCLIやTelegram/Discordインターフェースからメッセージを送信すると、バックエンドでGemini CLIが起動し、応答を返します。
+起動方法は2種類あります。手軽な一括起動か、個別起動を選べます。
+
+### A. 一括起動（推奨）
+OpenClaw Gateway、Geminiアダプタ、およびコントロールダッシュボードのすべてを自動で起動するスクリプトを用意しています。
+
+| 環境 | 実行スクリプト |
+|---|---|
+| **Windows** | `launch.bat` をダブルクリック（またはコマンドプロンプトで実行） |
+| **macOS / Linux** | ターミナルで `./launch.sh` を実行 |
+
+実行すると、バックグラウンドでシステムが立ち上がり、自動的にブラウザでコントロールUI（ダッシュボード）が開きます。
+
+### B. 個別起動（手動）
+コマンドラインで動作状況を確認しながら手動起動する場合は、以下の順序で2つのプロセスを立ち上げてください。
+
+1. **Geminiアダプタの起動**（ポート: 3972）
+```bash
+./start.sh
+```
+
+2. **OpenClaw (Gateway) の起動**（ポート: 18789）
+新しいターミナルを開き、OpenClawのルートディレクトリ（`openclaw/`）で以下を実行：
+```bash
+npm run start
+```
+
+## GUIでの設定 (ダッシュボード)
+OpenClawのGatewayが起動している状態で、ブラウザからコントロールUIを開くことでモデルの設定が可能です。
+（※ 一括起動スクリプト `launch.sh/bat` を使った場合は自動で開きます）
 
 ## アーキテクチャ
 
@@ -135,6 +165,6 @@ OpenClawの設定 (`openclaw.json`) にて、メインの推論エンジンをGe
 
 このアダプタを削除して元のOpenClawの状態に戻すには以下の手順を行ってください。
 
-1. `~/.openclaw/openclaw.json` を開き、`models.primary` を元の値（例: `anthropic-messages/claude-sonnet-3-5` など）に戻します。
-2. `openclaw.json` の `cliBackends` に追加された `"gemini-adapter"` のブロックを削除します。
+1. `~/.openclaw/openclaw.json` を開き、`agents.defaults.model` を元の値（例: `anthropic-messages/claude-sonnet-3-5` など）に戻します。
+2. `openclaw.json` の `models.providers` に追加された `"gemini-adapter"` のブロックを削除します。
 3. リポジトリフォルダ (`openclaw-gemini-cli-adapter`) を削除します。システム全体（グローバル）への影響は一切残らず、クリーンに削除されます。

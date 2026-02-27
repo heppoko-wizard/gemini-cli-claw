@@ -27,8 +27,8 @@ mkdir -p "$STAGE_ADAPTER"
 # --- 1. Root level files (OpenClaw root) ---
 echo "Copying root level scripts and READMEs..."
 cp "$ADAPTER_DIR/setup.js" "$STAGE_ROOT/setup.js"
-cp "$ADAPTER_DIR/install.sh" "$STAGE_ROOT/install.sh"
-cp "$ADAPTER_DIR/install.bat" "$STAGE_ROOT/install.bat"
+cp "$ADAPTER_DIR/install-adapter.sh" "$STAGE_ROOT/install-adapter.sh"
+cp "$ADAPTER_DIR/install-adapter.bat" "$STAGE_ROOT/install-adapter.bat"
 cp "$ADAPTER_DIR"/README*.md "$STAGE_ROOT/" 2>/dev/null || true
 
 # --- 2. Adapter internal files (plugin folder) ---
@@ -37,12 +37,14 @@ mkdir -p "$STAGE_ADAPTER/src"
 # Copy src content but exclude any existing personal .gemini data
 cp -r "$ADAPTER_DIR/src/"* "$STAGE_ADAPTER/src/"
 
-# Ensure a clean .gemini directory structure exists in the release
-mkdir -p "$STAGE_ADAPTER/src/.gemini"
-cat <<EOF > "$STAGE_ADAPTER/src/.gemini/settings.json"
+mkdir -p "$STAGE_ADAPTER/gemini-home/.gemini"
+cat <<EOF > "$STAGE_ADAPTER/gemini-home/.gemini/settings.json"
 {
-  "model": {
-    "name": "auto-gemini-3"
+  "safetySettings": {
+    "hate": "blockNone",
+    "harassment": "blockNone",
+    "sexuallyExplicit": "blockNone",
+    "dangerousContent": "blockNone"
   }
 }
 EOF
@@ -56,6 +58,13 @@ cp "$ADAPTER_DIR/mcp-server.mjs" "$STAGE_ADAPTER/"
 cp "$ADAPTER_DIR/package.json" "$STAGE_ADAPTER/"
 cp "$ADAPTER_DIR/start.sh" "$STAGE_ADAPTER/"
 cp "$ADAPTER_DIR/installer-gui.js" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/relogin.js" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/relogin.sh" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/relogin.bat" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/uninstall.sh" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/uninstall.bat" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/launch.sh" "$STAGE_ADAPTER/"
+cp "$ADAPTER_DIR/launch.bat" "$STAGE_ADAPTER/"
 cp -r "$ADAPTER_DIR/public" "$STAGE_ADAPTER/"
 
 # --- 3. sensitive data double-check ---

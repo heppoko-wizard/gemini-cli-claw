@@ -47,7 +47,7 @@ if [ "$USE_CLI" = true ]; then
 
       3. Gemini CLI (Google AI Command-Line Tool)
          - アダプタが内部で呼び出す AI エンジン
-         - OpenClaw 専用の隔離環境としてインストール（src/.gemini）
+         - OpenClaw 専用の隔離環境としてインストール（gemini-home）
 
       【起動後の構成イメージ】
         あなた（Telegram）
@@ -59,7 +59,7 @@ if [ "$USE_CLI" = true ]; then
         Gemini CLI → Google Gemini API（クラウド）
 
       【Gemini CLI の専用インストールと認証について】
-        このアダプタで使用する Gemini CLI は、このフォルダ内（src/.gemini）に
+        このアダプタで使用する Gemini CLI は、このフォルダ内（gemini-home）に
         「OpenClaw 専用」として完全に独立してインストールされます。
 
         そのため、すでにPC本体に Gemini CLI がインストールされている場合でも、
@@ -113,7 +113,7 @@ if [ "$USE_CLI" = true ]; then
 
       3. Gemini CLI (Google AI Command-Line Tool)
          - 适配器在内部调用的 AI 引擎
-         - 作为一个专用的隔离环境安装（src/.gemini）
+         - 作为一个专用的隔离环境安装（gemini-home）
 
       【启动后的架构】
         您（Telegram）
@@ -125,7 +125,7 @@ if [ "$USE_CLI" = true ]; then
         Gemini CLI → Google Gemini API（云端）
 
       【Gemini CLI 的专用安装与认证】
-        此适配器使用的 Gemini CLI 将完全独立地安装在此文件夹内（src/.gemini），
+        此适配器使用的 Gemini CLI 将完全独立地安装在此文件夹内（gemini-home），
         作为「OpenClaw 专用」环境。
 
         因此，即使您的电脑上已经安装了 Gemini CLI，
@@ -179,7 +179,7 @@ if [ "$USE_CLI" = true ]; then
 
       3. Gemini CLI (Google AI Command-Line Tool)
          - The AI engine invoked internally by the adapter
-         - Installed in isolation as a dedicated OpenClaw environment (src/.gemini)
+         - Installed in isolation as a dedicated OpenClaw environment (gemini-home)
 
       [Architecture after setup]
         You (Telegram)
@@ -192,7 +192,7 @@ if [ "$USE_CLI" = true ]; then
 
       [Authentication]
         Your Gemini API credentials are stored in isolation within
-        this adapter folder (src/.gemini). Your existing global
+        this adapter folder (gemini-home). Your existing global
         Gemini CLI settings are NOT affected.
         (*Logging in here will not affect the Gemini CLI on your system)"
 

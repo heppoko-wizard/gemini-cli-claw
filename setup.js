@@ -26,7 +26,7 @@ if (path.basename(SCRIPT_DIR) === "openclaw-gemini-cli-adapter" || path.basename
 
 const SERVER_JS = path.join(PLUGIN_DIR, "src", "server.js");
 const OPENCLAW_CONFIG = path.join(os.homedir(), ".openclaw", "openclaw.json");
-const GEMINI_CREDS_DIR = path.join(PLUGIN_DIR, "src", ".gemini");
+const GEMINI_CREDS_DIR = path.join(PLUGIN_DIR, "gemini-home");
 
 // Messages vocabulary
 const MSG = {
@@ -54,6 +54,7 @@ const MSG = {
         syncSuccess: "✓ モデルの同期完了",
         registerAdapter: "openclaw.json に gemini-adapter を登録しています...",
         registerAdapterSuccess: "✓ gemini-adapter の登録完了",
+        registerAdapterSuccess: "✓ gemini-adapter の登録完了",
         askPrimaryModel: "Gemini アダプタを OpenClaw のデフォルト（primary）に設定しますか？ (Y/n): ",
         primaryModelSuccess: "✓ プライマリモデルとして設定しました。",
         skipPrimaryModel: "ℹ️ 設定をスキップしました。後で手動で行う場合は ~/.openclaw/openclaw.json を編集してください。",
@@ -64,7 +65,7 @@ const MSG = {
 🔑 Gemini CLI 認証について
 -------------------------------------------------
   ここでの認証は OpenClaw 専用の Gemini CLI に対して行われます。
-  インストール先: このフォルダ内の src/.gemini
+  インストール先: このフォルダ内の gemini-home/.gemini
 
   ✓ PC に既に Gemini CLI がインストールされていても影響しません。
   ✓ 設定・認証情報は一切共有されません。
@@ -108,7 +109,7 @@ const MSG = {
   Gemini CLI → Google Gemini API（クラウド）
 
 【認証について】
-  Gemini API の認証情報はこのアダプタフォルダ内（src/.gemini）に
+  Gemini API の認証情報はこのアダプタフォルダ内（gemini-home/.gemini）に
   隔離して保存されます。既存の Gemini CLI の設定には影響しません。
 
 【起動時の注意】
@@ -166,7 +167,7 @@ const MSG = {
 🔑 About Gemini CLI Authentication
 -------------------------------------------------
   This authentication is for the OpenClaw-dedicated Gemini CLI.
-  Install location: src/.gemini inside this folder
+  Install location: gemini-home/.gemini inside this folder
 
   ✓ Will not affect any existing Gemini CLI on your system.
   ✓ Settings and credentials are NOT shared.
@@ -211,7 +212,7 @@ This installer will configure the following:
 
 [Authentication]
   Your Gemini API credentials are stored in isolation within
-  this adapter folder (src/.gemini). Your existing global
+  this adapter folder (gemini-home/.gemini). Your existing global
   Gemini CLI settings are NOT affected.
 
 [How to Start]
@@ -270,7 +271,7 @@ This installer will configure the following:
 🔑 关于 Gemini CLI 认证
 -------------------------------------------------
   此处的认证针对 OpenClaw 专用的 Gemini CLI。
-  安装位置：此文件夹内的 src/.gemini
+  安装位置：此文件夹内的 gemini-home/.gemini
 
   ✓ 不会影响系统上现有的 Gemini CLI。
   ✓ 设置和认证信息不会共享。
@@ -314,7 +315,7 @@ This installer will configure the following:
 
 【关于身份验证】
   您的 Gemini API 凭证将被隔离保存在本工具文件夹内
-  （src/.gemini），不会影响您现有的全局 Gemini CLI 配置。
+  （gemini-home/.gemini），不会影响您现有的全局 Gemini CLI 配置。
 
 【启动顺序】
   1. 先启动适配器: ./openclaw-gemini-cli-adapter/start.sh
@@ -565,16 +566,24 @@ async function main() {
         fs.mkdirSync(path.dirname(OPENCLAW_CONFIG), { recursive: true });
     }
 
-    if (!config.models) config.models = {};
+    if (!config.agents) config.agents = {};
+    if (!config.agents.defaults) config.agents.defaults = {};
     
+    // OpenClaw <= 2026.2.25 は config.models.primary
+    // OpenClaw >= 2026.2.26 は config.agents.defaults.model
+    // Schema Errorを避けるため、古い models.primary があれば消去する
+    if (config.models && config.models.primary) {
+        delete config.models.primary;
+    }
+
     const setPrimary = await question(L.askPrimaryModel);
     if (setPrimary.trim() === '' || setPrimary.trim().toLowerCase() === 'y') {
-        config.models.primary = "gemini-adapter/auto-gemini-3";
+        config.agents.defaults.model = "gemini-adapter/auto-gemini-3";
     }
 
     try {
         fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2), "utf-8");
-        if (config.models.primary === "gemini-adapter/auto-gemini-3") {
+        if (config.agents.defaults.model === "gemini-adapter/auto-gemini-3") {
             console.log(L.primaryModelSuccess + "\n");
         } else {
             console.log(L.skipPrimaryModel + "\n");
@@ -590,8 +599,6 @@ async function main() {
     const credsPaths = [
         path.join(GEMINI_CREDS_DIR, ".gemini", "oauth_creds.json"),
         path.join(GEMINI_CREDS_DIR, ".gemini", "google_accounts.json"),
-        path.join(GEMINI_CREDS_DIR, "oauth_creds.json"),
-        path.join(GEMINI_CREDS_DIR, "google_accounts.json"),
     ];
 
     // Check if credentials actually contain valid auth data, not just empty templates.
@@ -688,8 +695,10 @@ async function main() {
     // Write out how to use it
     console.log("");
     console.log(L.configTip);
-    console.log('  "models": {');
-    console.log('    "primary": "gemini-adapter/auto-gemini-3"');
+    console.log('  "agents": {');
+    console.log('    "defaults": {');
+    console.log('      "model": "gemini-adapter/auto-gemini-3"');
+    console.log('    }');
     console.log('  }');
     console.log("");
     console.log(L.tryIt);

@@ -50,7 +50,7 @@
 
 **如果您正在使用 OpenClaw（已安装）：**
 请务必先将下载好的 `openclaw-gemini-cli-adapter` 文件夹整体移动至您现有的 `openclaw` 文件夹的**正下方**，然后再执行安装脚本。
-（位置示例：`openclaw/openclaw-gemini-cli-adapter/install.bat`）
+（位置示例：`openclaw/openclaw-gemini-cli-adapter/install-adapter.bat`）
 
 **如果您是首次接触并未安装过 OpenClaw：**
 请在任意文件夹中运行以下脚本，安装程序会自动完成下载 (git clone) 及 OpenClaw 本体的构建工作。
@@ -58,14 +58,14 @@
 **Linux / macOS:**
 ```bash
 # 进入该代码库文件夹并执行：
-chmod +x install.sh
-./install.sh
+chmod +x install-adapter.sh
+./install-adapter.sh
 ```
 
 **Windows:**
-请在资源管理器中双击此文件夹内的 `install.bat`，或在命令提示符中执行以下命令。
+请在资源管理器中双击此文件夹内的 `install-adapter.bat`，或在命令提示符中执行以下命令。
 ```cmd
-install.bat
+install-adapter.bat
 ```
 
 ## 使用方法
@@ -73,12 +73,44 @@ install.bat
 请在 OpenClaw 的设置文件 (`openclaw.json`) 中，将主力推理引擎切换至 Gemini 适配器。
 
 ```json
-"models": {
-  "primary": "gemini-adapter/default"
+"agents": {
+  "defaults": {
+    "model": "gemini-adapter/auto-gemini-3"
+  }
 }
 ```
 
 配置完成后，像往常一样从 OpenClaw CLI 或 Telegram/Discord 界面发送消息即可，后台将启动 Gemini CLI 配合并返回响应。
+
+有两​​种启动系统的方法：方便的“一键启动”或“手动分别启动”。
+
+### A. 一键启动（推荐）
+我们提供了一个脚本，可以自动同时启动 OpenClaw Gateway、Gemini 适配器和控制仪表板。
+
+| 环境 | 执行脚本 |
+|---|---|
+| **Windows** | 双击 `launch.bat`（或在命令提示符中执行） |
+| **macOS / Linux** | 在终端执行 `./launch.sh` |
+
+执行后，系统将在后台启动，并自动在浏览器中打开控制 UI（仪表板）。
+
+### B. 手动启动
+如果您希望在命令行中监控其运行状态并手动启动，请按以下顺序启动这两个进程：
+
+1. **启动 Gemini 适配器**（端口：3972）
+```bash
+./start.sh
+```
+
+2. **启动 OpenClaw Gateway**（端口：18789）
+打开一个新的终端，在 OpenClaw 的根目录（`openclaw/`）下执行以下命令：
+```bash
+npm run start
+```
+
+## GUI 配置 (仪表板)
+在 OpenClaw Gateway 运行期间，您可以从浏览器打开控制 UI 来配置模型。
+（※ 注意：如果您使用了 `launch.sh/bat` 脚本，它会自动打开）
 
 ## 架构说明
 
@@ -137,6 +169,6 @@ install.bat
 
 若需移除本适配器并恢复至 OpenClaw 原有状态，请执行以下步骤：
 
-1. 打开 `~/.openclaw/openclaw.json`，将 `models.primary` 还原为您原始的值（例如：`anthropic-messages/claude-sonnet-3-5` 等）。
-2. 删除 `openclaw.json` 中 `cliBackends` 节点下新增的 `"gemini-adapter"` 设定块。
+1. 打开 `~/.openclaw/openclaw.json`，将 `agents.defaults.model` 还原为您原始的值（例如：`anthropic-messages/claude-sonnet-3-5` 等）。
+2. 删除 `openclaw.json` 中 `models.providers` 节点下新增的 `"gemini-adapter"` 设定块。
 3. 删除整个仓库文件夹 (`openclaw-gemini-cli-adapter`)。此操作即可做到纯净卸载，丝毫不会残留系统级全局垃圾。

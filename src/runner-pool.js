@@ -38,11 +38,18 @@ function resolveOpenClawWorkspace() {
  * - 資格情報が存在しない場合は、グローバルからのコピーではなくエラーログを出す（setup.js での認証を促す）
  */
 function prepareIsolatedGeminiHome(workspaceCwd) {
-    const isolatedHomeDir = path.join(__dir, 'gemini-home');
+    const baseDir = path.resolve(__dirname, '..');
+    const isolatedHomeDir = path.join(baseDir, 'gemini-home');
     const isolatedGeminiDir = path.join(isolatedHomeDir, '.gemini');
     
     if (!fs.existsSync(isolatedGeminiDir)) {
         fs.mkdirSync(isolatedGeminiDir, { recursive: true });
+    }
+
+    for (const file of ['oauth_creds.json', 'google_accounts.json', 'installation_id']) {
+        const src = path.join(baseDir, 'gemini-home', '.gemini', file);
+        if (!fs.existsSync(src)) continue;
+        try { fs.copyFileSync(src, path.join(isolatedGeminiDir, file)); } catch (_) {}
     }
 
     // 1. 隔離環境の settings.json を読み込み、openclaw-tools MCP を注入
@@ -57,7 +64,7 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
     userSettings.mcpServers = userSettings.mcpServers || {};
     userSettings.mcpServers['openclaw-tools'] = {
         command: 'node',
-        args: [path.join(__dir, 'mcp-server.mjs'), 'pool-shared', workspaceCwd],
+        args: [path.join(baseDir, 'mcp-server.mjs'), 'pool-shared', workspaceCwd],
         trust: true
     };
 
@@ -102,7 +109,14 @@ class RunnerPool {
         
         console.log("[Pool] Spawning a new warm standby runner...");
         const runnerPath = path.resolve(__dirname, 'runner.js');
-        const runner = spawn('bun', [runnerPath, '--yolo', '-o', 'stream-json'], {
+        
+        let execCmd = 'bun';
+        const bunPath = path.join(os.homedir(), '.bun', 'bin', 'bun');
+        if (fs.existsSync(bunPath)) {
+            execCmd = bunPath; // PATHが通っていない場合のための絶対パス指定
+        }
+
+        const runner = spawn(execCmd, [runnerPath, '--yolo', '-o', 'stream-json'], {
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             cwd: this.workspaceCwd,
             env: {
@@ -137,6 +151,53 @@ class RunnerPool {
 
         runner.on('error', (err) => {
             console.error("[Pool] Runner process error:", err);
+            this.isSpawning = false;
+            
+            // Bun起動失敗時のフォールバック (Node.js)
+            if (err.code === 'ENOENT' && execCmd.includes('bun')) {
+                console.log("[Pool] Bun runtime not found. Falling back to Node.js.");
+                this.spawnNewRunnerWithNode();
+            }
+        });
+    }
+
+    spawnNewRunnerWithNode() {
+        if (this.isSpawning) return;
+        this.isSpawning = true;
+        
+        console.log("[Pool] Spawning runner (Node.js fallback)...");
+        const runnerPath = path.resolve(__dirname, 'runner.js');
+        const runner = spawn('node', [runnerPath, '--yolo', '-o', 'stream-json'], {
+            stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+            cwd: this.workspaceCwd,
+            env: {
+                ...process.env,
+                GEMINI_CLI_HOME: this.isolatedGeminiHome,
+            }
+        });
+        
+        runner.once('message', (msg) => {
+            if (msg.type === 'ready') {
+                this.isSpawning = false;
+                console.log("[Pool] Runner is ready to accept requests (Node fallback).");
+                if (this.pendingRequests.length > 0) {
+                    const req = this.pendingRequests.shift();
+                    this.assignRunner(runner, req);
+                } else {
+                    this.readyRunner = runner;
+                }
+            }
+        });
+        
+        runner.once('exit', (code) => {
+            console.log(`[Pool] Runner (Node fallback) consumed (exited with code ${code}).`);
+            this.readyRunner = null;
+            this.isSpawning = false;
+            this.spawnNewRunnerWithNode();
+        });
+
+        runner.on('error', (err) => {
+            console.error("[Pool] Runner process error (Node fallback):", err);
             this.isSpawning = false;
         });
     }
