@@ -9,7 +9,7 @@ echo  OpenClaw × Gemini Adapter 一括起動スクリプト
 echo =================================================
 echo.
 
-echo [1/3] Gemini CLI アダプタを起動中...
+echo [1/4] Gemini CLI アダプタを起動中...
 if not exist logs mkdir logs
 set GEMINI_CLI_HOME=%~dp0gemini-home
 
@@ -22,8 +22,27 @@ if %errorlevel% equ 0 (
 )
 
 echo.
-echo [2/3] OpenClaw Gatewayを起動中...
+echo [2/4] UIアセットの確認中...
 cd ..
+if not exist dist\control-ui\index.html (
+    echo ⚠️  UIアセットが見つかりません。ビルドを試みます...
+    where pnpm >nul 2>&1
+    if %errorlevel% equ 0 (
+        pnpm ui:build
+    ) else (
+        npm run ui:build
+    )
+    if exist dist\control-ui\index.html (
+        echo ✓ UIビルドが完了しました。
+    ) else (
+        echo ⚠️  UIビルドが失敗しました。手動で pnpm ui:build を実行してください。
+    )
+) else (
+    echo ✓ UIアセット確認済み。
+)
+
+echo.
+echo [3/4] OpenClaw Gatewayを起動中...
 netstat -ano | find "LISTENING" | find ":18789" >nul
 if %errorlevel% equ 0 (
     echo OpenClaw Gatewayは既に起動しています。
@@ -41,7 +60,7 @@ if %errorlevel% equ 0 (
 )
 
 echo.
-echo [3/3] ダッシュボードをブラウザで開きます...
+echo [4/4] ダッシュボードをブラウザで開きます...
 npm run openclaw -- dashboard
 
 echo.

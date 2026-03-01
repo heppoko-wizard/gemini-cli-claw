@@ -4,7 +4,7 @@
   "description": "OpenClaw Gateway for Gemini CLI - A powerful bridge that turns Gemini CLI into an autonomous agent.",
   "main": "src/server.js",
   "scripts": {
-    "setup": "node setup.js",
+    "setup": "node interactive-setup.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

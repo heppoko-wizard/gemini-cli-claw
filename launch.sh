@@ -17,13 +17,34 @@ echo " OpenClaw × Gemini Adapter 一括起動スクリプト"
 echo "================================================="
 echo ""
 
-echo "[1/3] Gemini CLI アダプタを起動中..."
+echo "[1/4] Gemini CLI アダプタを起動中..."
 chmod +x start.sh 2>/dev/null || true
 ./start.sh
 
 echo ""
-echo "[2/3] OpenClaw Gatewayを起動中..."
+echo "[2/4] UIアセットの確認中..."
 cd ..
+if [ ! -f "dist/control-ui/index.html" ]; then
+    echo "⚠️  UIアセットが見つかりません。ビルドを開始します..."
+    if command -v pnpm >/dev/null 2>&1; then
+        pnpm ui:build
+    elif command -v npm >/dev/null 2>&1; then
+        npm run ui:build
+    else
+        echo "❌ エラー: pnpm/npm が見つかりません。UIビルドをスキップします。"
+    fi
+    if [ -f "dist/control-ui/index.html" ]; then
+        echo "✓ UIビルドが完了しました。"
+    else
+        echo "⚠️  UIビルドが失敗したか、まだ完了していません。ダッシュボードが表示されない場合は 'pnpm ui:build' を手動実行してください。"
+    fi
+else
+    echo "✓ UIアセット確認済み。"
+fi
+
+echo ""
+echo "[3/4] OpenClaw Gatewayを起動中..."
+
 
 # Gatewayの起動ログ用
 GATEWAY_LOG="openclaw-gateway.log"
@@ -49,7 +70,7 @@ else
 fi
 
 echo ""
-echo "[3/3] ダッシュボードをブラウザで開きます..."
+echo "[4/4] ダッシュボードをブラウザで開きます..."
 # dashboardコマンドを実行してURLを生成しブラウザを開く
 npm run openclaw -- dashboard
 

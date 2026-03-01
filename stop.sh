@@ -45,6 +45,11 @@ echo "-> 残存する Runner プロセスをクリーンアップ中..."
 pkill -f "src/runner.js" 2>/dev/null
 pkill -f "gemini-cli" 2>/dev/null
 
+# 6. xclip や wl-copy のゾンビプロセスが残っていれば一掃
+echo "-> クリップボードプロセス (xclip/wl-copy) をクリーンアップ中..."
+pkill -f "xclip" 2>/dev/null
+pkill -f "wl-copy" 2>/dev/null
+
 echo ""
 echo "=============================================================="
 echo " ✓ すべてのプロセスを終了しました。"

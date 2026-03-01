@@ -84,8 +84,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && (url.pathname === '/v1/chat/completions' || url.pathname === '/chat/completions' || url.pathname === '/responses')) {
         let body;
         try {
-            const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
             body = await readBody(req);
+            const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
+            const logDir = require('path').dirname(logPath);
+            if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
             fs.writeFileSync(logPath, JSON.stringify(body, null, 2), 'utf-8');
             log(`Request body saved to logs/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
         }
