@@ -256,14 +256,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
 
         if (requestId) activeRequests.delete(requestId);
 
+        // OpenClawのツールは通常、MCPの標準レスポンス形式（{ content: [{ type: 'text', text: '...' }] }）を返す。
+        // すでに content 配列を持っている場合はそのまま返す。
+        if (result && Array.isArray(result.content)) {
+            // details などの余分なフィールドは削除して返す
+            return {
+                content: result.content,
+                isError: result.isError || false,
+            };
+        }
+
         let responseText;
         if (result == null) {
             responseText = "(no output)";
         } else if (typeof result === "string") {
             responseText = result;
-        } else if (result.text != null) {
+        } else if (typeof result === "object" && result.text != null) {
             responseText = result.text;
         } else {
+            // contentがない未知のオブジェクトの場合は文字列化する
             responseText = JSON.stringify(result, null, 2);
         }
 
