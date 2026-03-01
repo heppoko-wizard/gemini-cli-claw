@@ -460,3 +460,50 @@
 - `333767ae` — docs(devlog): add session 21 entries for path unification and gateway fix
 - `507204f2` — feat(scripts): add stop.sh and stop.bat to manage process lifecycle
 - `29e50059` — fix(streaming): properly relay 'result' type errors to OpenClaw UX
+---
+
+## セッション 22: GUIインストーラーの廃止とCLI対話型セットアップの極致化 (2026-03-01)
+
+### やったこと
+- **GUI アプローチの完全廃止:**
+  前回のセッションでブラウザベースの GUI インストーラー（`installer-gui.js`）を構築したが、Windows/Mac/Linux 間の微妙な環境差やブラウザのポップアップブロック等に起因する「鬼門（不安定要素）」が拭えなかった。ユーザーの強い要望によりこれを潔く全廃し、堅牢な CLI に一本化する方針へと舵を切った。
+- **ターミナル上でのフル対話 UI (`interactive-setup.js`) の構築:**
+  キーボードの「Y/N」手入力を一切要求せず、矢印キー（↑↓）と Enter だけで直感的に選択・進行できるリッチな CLI インターフェースを Node.js の `readline` を駆使して実装。
+- **Gemini CLI 認証フローの完全自動化:**
+  `gemini login` という独立サブコマンドが存在しない仕様の壁に直面したが、`patch_gemini.js` で `OPENCLAW_AUTO_CONSENT=true` 環境変数を有効化し、さらに `gemini` 標準起動プロセスの stdin に対して `y\n` をパイプで自動送信する仕組みを構築。認証完了（`Authentication succeeded`）を stdout から検知し、安全に自動キルする完璧なサイレント認証フローを実現した。
+- **OS 自動起動機能の追加:**
+  セットアップの最終ステップに「PC起動（ログイン）時に OpenClaw を自動起動させますか？」という選択肢を追加。Windows (VBScript を Startup へ), macOS (plist を LaunchAgents へ), Linux (.desktop を autostart へ) の各環境に応じた自動起動設定ファイルの生成ロジックを追加。
+- **パッキング構成と名称の最適化:**
+  `pack_release.sh` を改修し、ZIP アーカイブ作成時に古い重複ファイルが混入するバグ (`zip` コマンドの追記仕様) を修正。さらに `setup.sh/bat` を `setup-openclaw-gemini-cli-adapter.sh/bat` へリネームして配布時の明確性を向上させた。
+
+### 発見・学んだこと
+- **Gemini CLI の仕様とプロセス制御:**
+  `gemini login` というコマンドはなく、デフォルトの対話起動から認証へ入るのが正解であること。そして CLI ツールの対話プロンプト（`[Y/n]`）は `stdio: 'pipe'` で繋いで RegExp で検知し `stdin.write('y\n')` すれば完全にプログラム側から自動操縦できること。
+- **zipコマンドの落とし穴:**
+  bash における `zip -r` はデフォルトで「差分更新（既存アーカイブへの追記・上書き）」として振る舞うため、リネームや削除を行ったファイルをパッケージングする際は、事前に `rm -f "$OUTPUT_ZIP"` で古い ZIP を消しておかないとゴミが残る。
+
+### 変更したファイル
+- `interactive-setup.js` — 矢印UI、一括インストール、認証自動化、OS自動起動などの全ロジックを集約
+- `setup-openclaw-gemini-cli-adapter.sh/bat` — （旧 `setup.sh/bat` からリネーム）Node.jsの有無だけを判定する最小ブートストラッパーへ縮小
+- `installer-gui.js` / `install.sh` などの旧セットアップ群 — 全削除
+- `pack_release.sh` — 不要ファイルの除外、ZIP事前削除、リネーム対応
+- `package.json` — `npm run setup` の参照先変更
+
+### コミット
+- `[refactor](setup): GUIインストーラー廃止とCLI対話型セットアップへの完全統合`
+
+---
+
+## セッション 23: MCPサーバーの動的チャンク解決機能の実装 (2026-03-01)
+
+### やったこと
+- **課題**: OpenClaw 本体の `dist/index.js` から `createOpenClawCodingTools` 等の内部APIがエクスポートされなくなり、Gemini CLI との MCP 連携（`mcp-server.mjs`）が `TypeError` で起動不能になった。以前はビルドの偶然で露出していたが、完全に秘匿されたため。
+- **解決策**:
+  - `mcp-server.mjs` を大幅に書き換え。`dist/*.js` 内のハッシュ付きチャンクファイルを直接テキストスキャンし、正規表現 `\bcreateOpenClawTools as (\w+)\b` を用いて、エクスポート名（alias）を動的に抽出するハックを実装した。
+  - 抽出した alias を用いて直接内部モジュールを import することで、ビルドごとのAPI非公開化やファイル名変化に耐えうる設計とした。
+  - プロキシ対象を `createOpenClawCodingTools` から、より適切な（Gemini標準のファイル操作系を含まない）`createOpenClawTools` に変更。`cron`, `message`, `gateway`, `tts`, `browser` 等の OpenClaw 固有ツールのみを露出させた。
+- **将来へのディフェンシブ実装**:
+  - このテキストスキャンハックが今後使えなくなった場合（文字列の難読化など）を見越し、mcp-server 内の該当エラー箇所に「**将来のLLM/開発者向けの復旧指南用コメント**（CLIコマンドラッパー方式への移行推奨）」を明記した。
+
+### 気付き・学んだこと
+- 本体のビルド出力（minified chunk）に強く依存するブリッジコードは非常に脆い。今回のテキスト抽出ハックは延命措置として機能するが、恒久的には `child_process` 経由の CLI 呼び出しなど、より疎結合なアーキテクチャへの移行が正解であることを確認した。
