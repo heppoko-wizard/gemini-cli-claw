@@ -349,9 +349,25 @@ async function main() {
     const sp = path.join(settingsDir, 'settings.json');
     let settings = {};
     try { settings = JSON.parse(fs.readFileSync(sp, 'utf8')); } catch {}
+    
+    // 報告書に基づいたフル権限・安定稼働設定を注入
+    settings.model = settings.model || { name: 'auto-gemini-3' };
+    settings.general = { ...settings.general, defaultApprovalMode: 'yolo' };
     settings.security = settings.security || {};
     settings.security.auth = { ...settings.security.auth, selectedType: 'oauth-personal' };
     settings.security.folderTrust = { enabled: false };
+    settings.tools = { ...settings.tools, sandbox: false };
+    
+    // コンテキストにホームディレクトリを含める（フルアクセス権限）
+    const home = os.homedir();
+    settings.context = {
+        ...settings.context,
+        includeDirectories: Array.from(new Set([
+            ...(settings.context?.includeDirectories || []),
+            home
+        ]))
+    };
+
     fs.writeFileSync(sp, JSON.stringify(settings, null, 2));
 
     // ─── 5. Gemini 認証 (同じターミナル内) ───

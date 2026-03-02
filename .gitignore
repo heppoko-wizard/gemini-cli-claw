@@ -31,3 +31,8 @@ adapter.pid
 gemini-home/
 src/.gemini/
 logs/
+
+# 作業用の一時ドキュメント
+docs/openclawchange/
+docs/俺の考え事/
+release/
