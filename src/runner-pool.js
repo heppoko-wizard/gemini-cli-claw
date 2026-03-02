@@ -62,9 +62,11 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
     } catch (_) {}
 
     userSettings.mcpServers = userSettings.mcpServers || {};
+    // デバッグ用: stderr を logs/mcp.log にリダイレクトするシェルラッパーを一時的に復活
+    const mcpLogPath = path.join(baseDir, 'logs', 'mcp.log');
     userSettings.mcpServers['openclaw-tools'] = {
-        command: 'node',
-        args: [path.join(baseDir, 'mcp-server.mjs'), 'pool-shared', workspaceCwd],
+        command: 'bash',
+        args: ['-c', `node "${path.join(baseDir, 'mcp-server.mjs')}" "pool-shared" "${workspaceCwd}" 2>> "${mcpLogPath}"`],
         trust: true
     };
 
@@ -116,7 +118,7 @@ class RunnerPool {
             execCmd = bunPath; // PATHが通っていない場合のための絶対パス指定
         }
 
-        const runner = spawn(execCmd, [runnerPath, '--yolo', '-o', 'stream-json'], {
+        const runner = spawn(execCmd, [runnerPath, '--approval-mode=yolo', '--sandbox=false', '-o', 'stream-json'], {
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             cwd: this.workspaceCwd,
             env: {
@@ -167,7 +169,7 @@ class RunnerPool {
         
         console.log("[Pool] Spawning runner (Node.js fallback)...");
         const runnerPath = path.resolve(__dirname, 'runner.js');
-        const runner = spawn('node', [runnerPath, '--yolo', '-o', 'stream-json'], {
+        const runner = spawn('node', [runnerPath, '--approval-mode=yolo', '--sandbox=false', '-o', 'stream-json'], {
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             cwd: this.workspaceCwd,
             env: {

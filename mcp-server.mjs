@@ -28,13 +28,27 @@ import fs from "node:fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const LOG_FILE = path.join(__dirname, "logs", "mcp.log");
+
+function logToBoth(msg) {
+    const timestamp = new Date().toISOString();
+    const formatted = `[${timestamp}] ${msg}`;
+    console.error(formatted);
+    try {
+        if (!fs.existsSync(path.dirname(LOG_FILE))) {
+            fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+        }
+        fs.appendFileSync(LOG_FILE, formatted + "\n");
+    } catch (_) {}
+}
+
 // The openclaw repo root is one level above this `openclaw-gemini-cli-adapter/` directory.
 const OPENCLAW_ROOT = path.resolve(__dirname, "..");
 const OPENCLAW_DIST = path.join(OPENCLAW_ROOT, "dist");
 const OPENCLAW_DIST_INDEX = path.join(OPENCLAW_DIST, "index.js");
 
-console.error(`[MCP Adapter] Script location: ${__dirname}`);
-console.error(`[MCP Adapter] OpenClaw root: ${OPENCLAW_ROOT}`);
+logToBoth(`[MCP Adapter] Script location: ${__dirname}`);
+logToBoth(`[MCP Adapter] OpenClaw root: ${OPENCLAW_ROOT}`);
 
 // ---------- [1] Dynamic Chunk Discovery ----------
 /**
@@ -57,7 +71,7 @@ function findCreateOpenClawToolsChunk(distDir) {
             !f.startsWith("daemon-cli")
         );
     } catch (e) {
-        console.error(`[MCP Adapter] Cannot read dist dir: ${e.message}`);
+        logToBoth(`[MCP Adapter] Cannot read dist dir: ${e.message}`);
         return null;
     }
 
@@ -76,7 +90,7 @@ function findCreateOpenClawToolsChunk(distDir) {
             const content = fs.readFileSync(fullPath, "utf8");
             const match = content.match(EXPORT_PATTERN);
             if (match) {
-                console.error(`[MCP Adapter] Found createOpenClawTools in: ${file} (alias: "${match[1]}")`);
+                logToBoth(`[MCP Adapter] Found createOpenClawTools in: ${file} (alias: "${match[1]}")`);
                 return { path: fullPath, alias: match[1] };
             }
         } catch (_) {
@@ -99,7 +113,7 @@ const GEMINI_NATIVE_TOOLS = new Set([
 
 async function loadOpenClawTools(sessionKey, workspaceDir) {
     try {
-        console.error(`[MCP Adapter] Loading OpenClaw tools for session: ${sessionKey}`);
+        logToBoth(`[MCP Adapter] Loading OpenClaw tools for session: ${sessionKey}`);
 
         // Step 1: loadConfig だけを公開APIから取得
         const indexMod = await import(OPENCLAW_DIST_INDEX);
@@ -143,16 +157,23 @@ async function loadOpenClawTools(sessionKey, workspaceDir) {
         let config;
         try {
             config = loadConfig();
-            console.error(`[MCP Adapter] OpenClaw config loaded OK`);
+            logToBoth(`[MCP Adapter] OpenClaw config loaded OK`);
+            // デバッグログ追加：設定ファイルの特定
+            if (config?._meta?.configPath) {
+                logToBoth(`[MCP Adapter] Config Path: ${config._meta.configPath}`);
+            }
+            logToBoth(`[MCP Adapter] Cron Storage: ${config?.cron?.storage || "default (~/.openclaw/cron/jobs.json)"}`);
         } catch (e) {
-            console.error(`[MCP Adapter] Warning: OpenClaw config not loaded: ${e.message}`);
-            console.error(`[MCP Adapter] cron/message 等は設定なしでは動作しない可能性があります`);
+            logToBoth(`[MCP Adapter] Warning: OpenClaw config not loaded: ${e.message}`);
         }
 
-        // Step 5: ツールを生成（createOpenClawTools = OpenClaw固有ツールのみ、file/exec除外済み）
+        // Step 5: ツールを生成
+        const finalWorkspace = workspaceDir || OPENCLAW_ROOT;
+        logToBoth(`[MCP Adapter] Final Workspace: ${finalWorkspace}`);
+
         const allTools = createOpenClawTools({
             agentSessionKey: sessionKey,
-            workspaceDir: workspaceDir || OPENCLAW_ROOT,
+            workspaceDir: finalWorkspace,
             config,
             senderIsOwner: true,
         });
@@ -160,10 +181,10 @@ async function loadOpenClawTools(sessionKey, workspaceDir) {
         // Step 6: Gemini CLI ネイティブと重複するツールをさらに念のため除外
         openclawTools = allTools.filter(t => !GEMINI_NATIVE_TOOLS.has(t.name));
 
-        console.error(`[MCP Adapter] Loaded ${openclawTools.length} OpenClaw tools:`);
-        console.error(`  ${openclawTools.map(t => t.name).join(", ")}`);
+        logToBoth(`[MCP Adapter] Loaded ${openclawTools.length} OpenClaw tools:`);
+        logToBoth(`  ${openclawTools.map(t => t.name).join(", ")}`);
     } catch (e) {
-        console.error(`[MCP Adapter] FATAL: Failed to load OpenClaw tools:`, e);
+        logToBoth(`[MCP Adapter] FATAL: Failed to load OpenClaw tools:`, e);
         openclawTools = [];
     }
 }
@@ -189,7 +210,7 @@ server.onnotification = (notification) => {
     if (notification.method === "notifications/cancelled") {
         const requestId = notification.params?.requestId;
         if (requestId && activeRequests.has(requestId)) {
-            console.error(`[MCP Adapter] Cancelling request: ${requestId}`);
+            logToBoth(`[MCP Adapter] Cancelling request: ${requestId}`);
             activeRequests.get(requestId).abort();
             activeRequests.delete(requestId);
         }
@@ -231,7 +252,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     if (requestId) activeRequests.set(requestId, abortController);
 
     try {
-        console.error(`[MCP Adapter] Executing: ${toolName}`);
+        logToBoth(`[MCP Adapter] Executing: ${toolName} with args: ${JSON.stringify(toolArgs)}`);
 
         const toolCallId = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const result = await targetTool.execute(
@@ -239,42 +260,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             toolArgs,
             abortController.signal,
             (update) => {
-                console.error(`[MCP Adapter] ${toolName} update:`, JSON.stringify(update).slice(0, 200));
-                if (progressToken) {
-                    server.notification({
-                        method: "notifications/progress",
-                        params: {
-                            progressToken,
-                            progress: typeof update.progress === "number" ? update.progress : 0,
-                            total: 100,
-                            data: update.message || JSON.stringify(update),
-                        },
-                    }).catch(e => console.error("[MCP Adapter] Progress notification failed:", e));
-                }
+                logToBoth(`[MCP Adapter] ${toolName} update:`, JSON.stringify(update).slice(0, 200));
             }
         );
 
-        if (requestId) activeRequests.delete(requestId);
+        logToBoth(`[MCP Adapter] ${toolName} execution result: ${JSON.stringify(result).slice(0, 500)}`);
 
-        // OpenClawのツールは通常、MCPの標準レスポンス形式（{ content: [{ type: 'text', text: '...' }] }）を返す。
-        // すでに content 配列を持っている場合はそのまま返す。
-        if (result && Array.isArray(result.content)) {
-            // details などの余分なフィールドは削除して返す
-            return {
-                content: result.content,
-                isError: result.isError || false,
-            };
-        }
+        if (requestId) activeRequests.delete(requestId);
 
         let responseText;
         if (result == null) {
             responseText = "(no output)";
         } else if (typeof result === "string") {
             responseText = result;
-        } else if (typeof result === "object" && result.text != null) {
+        } else if (result.text != null) {
             responseText = result.text;
         } else {
-            // contentがない未知のオブジェクトの場合は文字列化する
             responseText = JSON.stringify(result, null, 2);
         }
 
@@ -286,7 +287,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         };
     } catch (error) {
         if (requestId) activeRequests.delete(requestId);
-        console.error(`[MCP Adapter] Error executing ${toolName}:`, error);
+        logToBoth(`[MCP Adapter] Error executing ${toolName}:`, error);
         return {
             content: [{
                 type: "text",
@@ -306,10 +307,10 @@ async function run() {
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error(`[MCP Adapter] Server ready (session: ${sessionKey}, tools: ${openclawTools.length})`);
+    logToBoth(`[MCP Adapter] Server ready (session: ${sessionKey}, tools: ${openclawTools.length})`);
 }
 
 run().catch((error) => {
-    console.error("[MCP Adapter] Fatal error:", error);
+    logToBoth("[MCP Adapter] Fatal error:", error);
     process.exit(1);
 });

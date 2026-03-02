@@ -36,3 +36,9 @@ logs/
 docs/openclawchange/
 docs/俺の考え事/
 release/
+
+# テスト・デバッグ用ファイル
+test-*.js
+test-*.mjs
+test-out.log
+logs/*.json
