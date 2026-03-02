@@ -59,8 +59,15 @@ cd /home/heppo/ドキュメント/DEV/openclaw/openclaw-gemini-cli-adapter
 - **対処**:
   - リクエスト（履歴）自体が空であれば、OpenClaw側のセッション管理（FUSEマウント切れ等）を疑う。Gatewayの再起動や `sudo umount -l` を試す。
 
+### 症状D: ツール（shell等）が "Permission Denied" または機能しない
+- **確認すること**:
+  - `gemini-home/.gemini/settings.json` の `tools.sandbox` が `false` になっているか。
+  - `context.includeDirectories` に操作対象のパスが含まれているか。
+- **対処**:
+  - `interactive-setup.js` を再実行するか、手動で `settings.json` を修正してサンドボックスを解除する。
+
 ## 3. 定期運用・クリーンアップ
-- （オプション）溜まったログファイル群 (`logs/adapter.log`, `openclaw-gateway.log`, `~/.openclaw/agents/` 内の `.jsonl`, `~/.gemini/tmp/chats/` 以下のファイル群）の肥大化によるディスク圧迫の監視・削除。
+- （オプション）溜まったログファイル群 (`logs/adapter.log`, `openclaw-gateway.log`, `~/.openclaw/agents/` 内の `.jsonl`, `gemini-home/.gemini/tmp/` 以下のファイル群）の肥大化によるディスク圧迫の監視・削除。
 
 ## 4. 環境情報
 
@@ -79,3 +86,4 @@ cd /home/heppo/ドキュメント/DEV/openclaw/openclaw-gemini-cli-adapter
 |------|----------|
 | 2026-02-22 | 初版作成。デバッグの失敗を元に障害対応の指針を策定 |
 | 2026-02-24 | ログ集約（`logs/`配下）およびRunnerPool化に伴うJSONL注入ハックの削除を反映 |
+| 2026-03-02 | 権限不足（サンドボックス制限）に関するトラブルシューティングを追記 |
