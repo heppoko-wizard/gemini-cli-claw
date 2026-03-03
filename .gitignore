@@ -27,8 +27,18 @@ adapter.pid
 *.metadata.json
 *.pb
 
-# Gemini CLI 専用ディレクトリ (隔離環境)
-gemini-home/
+# Gemini CLI 専用ディレクトリ（隔離環境）
+# ※ extensions/ 以下のソースは追跡対象とするため、gemini-home/ 全体は無視しない
+gemini-home/.gemini/
+gemini-home/tmp/
+# 拡張機能内の生成物・認証情報・依存パッケージ
+gemini-home/extensions/**/node_modules/
+gemini-home/extensions/**/dist/
+gemini-home/extensions/**/logs/
+gemini-home/extensions/**/.env
+gemini-home/extensions/**/.gemini-cli-workspace-master-key
+gemini-home/extensions/**/gemini-cli-workspace-token.json
+gemini-home/extensions/**/*.resolved
 src/.gemini/
 logs/
 

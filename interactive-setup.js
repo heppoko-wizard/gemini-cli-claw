@@ -449,6 +449,78 @@ async function main() {
         if (hasCredentials()) console.log(`\n  ${C.green(L().auth_done)}`);
     }
 
+    // ─── 5.3. Google Workspace 認証 (任意) ───
+    const WORKSPACE_EXT_DIR = path.join(PLUGIN_DIR, 'gemini-home', 'extensions', 'enhanced-google-workspace');
+    const WORKSPACE_AUTH_SCRIPT = path.join(WORKSPACE_EXT_DIR, 'scripts', 'auth-setup.js');
+    const WORKSPACE_TOKEN_FILE = path.join(WORKSPACE_EXT_DIR, 'gemini-cli-workspace-token.json');
+
+    const hasWorkspaceAuth = fs.existsSync(WORKSPACE_TOKEN_FILE);
+    const workspaceExtExists = fs.existsSync(WORKSPACE_AUTH_SCRIPT);
+
+    if (workspaceExtExists && !hasWorkspaceAuth) {
+        const wsAuthLabels = {
+            ja: {
+                q: '📊 Google Workspace（Gmail / Drive / Calendar）との連携を有効にしますか？',
+                yes: 'はい、Google アカウントでログインする（ブラウザが開きます）',
+                no: 'いいえ、スキップする（後から scripts/auth-setup.js で設定可能）',
+                start: 'ブラウザで Google にログインしてください。完了まで待機します...',
+                done: '✓ Google Workspace 認証が完了しました！',
+                fail: '✗ 認証に失敗しました。後から scripts/auth-setup.js を実行して再試行できます。',
+            },
+            en: {
+                q: '📊 Enable Google Workspace integration (Gmail / Drive / Calendar)?',
+                yes: 'Yes, log in with Google account (browser will open)',
+                no: 'No, skip for now (run scripts/auth-setup.js later)',
+                start: 'Please log in with Google in your browser. Waiting for completion...',
+                done: '✓ Google Workspace authentication complete!',
+                fail: '✗ Authentication failed. You can retry later by running scripts/auth-setup.js.',
+            }
+        };
+        const WL = wsAuthLabels[lang];
+
+        console.log(`\n  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
+        const wsChoice = await select([WL.yes, WL.no], WL.q);
+
+        if (wsChoice === 0) {
+            console.log(`\n  ${C.cyan(WL.start)}`);
+
+            // workspace拡張のnode_modulesにts-nodeがあるか確認し、なければインストール
+            const wsNodeModules = path.join(WORKSPACE_EXT_DIR, 'node_modules');
+            if (!fs.existsSync(wsNodeModules)) {
+                console.log(`  依存関係をインストール中...`);
+                run('npm', ['install'], WORKSPACE_EXT_DIR, false);
+            }
+
+            try {
+                await new Promise((resolve) => {
+                    const child = spawn('node', [WORKSPACE_AUTH_SCRIPT], {
+                        cwd: WORKSPACE_EXT_DIR,
+                        stdio: ['pipe', 'inherit', 'pipe'],
+                        shell: false,
+                    });
+                    child.stderr.on('data', (d) => {
+                        const s = d.toString();
+                        // 認証URLだけ表示する
+                        if (s.includes('http') || s.includes('ACTION REQUIRED') || s.includes('Please open')) {
+                            process.stdout.write(s);
+                        }
+                    });
+                    child.on('close', (code) => {
+                        if (code === 0) {
+                            console.log(`\n  ${C.green(WL.done)}`);
+                        } else {
+                            console.log(`\n  ${C.yellow(WL.fail)}`);
+                        }
+                        resolve();
+                    });
+                });
+            } catch (e) {
+                console.log(`\n  ${C.yellow(WL.fail)}`);
+            }
+        }
+        console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
+    }
+
     // ─── 5.5. 自動起動設定確認 (矢印) ───
     const autoIdx = await select([L().autostart_yes, L().autostart_no], L().autostart_q);
     if (autoIdx === 0) {
