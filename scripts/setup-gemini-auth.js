@@ -49,6 +49,7 @@ async function runAuth() {
             });
 
             console.log('\n  ブラウザで Google 認証を完了してください...');
+            console.log(`  🔗 ${authUrl}\n`);
             await openBrowser(authUrl);
 
             server.on('request', async (req, res) => {
