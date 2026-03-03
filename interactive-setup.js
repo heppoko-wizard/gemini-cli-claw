@@ -399,71 +399,27 @@ async function main() {
 
         await pressEnter(L().auth_start);
 
-        // ─── patch_gemini.js を適用（OPENCLAW_AUTO_CONSENTを有効化し [Y/n] を自動同意） ───
-        const patchPath = path.join(PLUGIN_DIR, 'patch_gemini.js');
-        if (fs.existsSync(patchPath)) {
-            try { require(patchPath); } catch(e) {}
-        }
+        // ─── 新しいプログラム認証スクリプトを呼び出し ───
+        const authScript = path.join(PLUGIN_DIR, 'scripts', 'setup-gemini-auth.js');
+        if (fs.existsSync(authScript)) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const child = spawn('node', [authScript], {
+                        cwd: PLUGIN_DIR,
+                        stdio: 'inherit',
+                        shell: false
+                    });
 
-        const gemBin = path.join(PLUGIN_DIR, 'node_modules', '.bin', 'gemini' + (process.platform === 'win32' ? '.cmd' : ''));
-        const cmd = fs.existsSync(gemBin) ? gemBin : 'gemini';
-
-        let child;
-        try {
-            await new Promise((resolve) => {
-                child = spawn(cmd, [], {
-                    cwd: PLUGIN_DIR,
-                    env: {
-                        ...process.env,
-                        GEMINI_CLI_HOME: GEMINI_CREDS_DIR,
-                        OPENCLAW_AUTO_CONSENT: 'true',
-                        TERM: 'dumb',
-                    },
-                    stdio: ['pipe', 'pipe', 'pipe'],
-                    shell: true
+                    child.on('close', (code) => {
+                        if (code === 0) resolve();
+                        else resolve(); // 失敗してもセットアップ処理自体は継続する仕様（後から認証可能）
+                    });
                 });
-
-                let done = false;
-
-                const checkDone = (data) => {
-                    const str = data.toString();
-                    process.stdout.write(str);
-
-                    // [Y/n] 系のプロンプトが出たら自動で y を送信
-                    if (/\[Y\/n\]|\[y\/n\]/i.test(str)) {
-                        child.stdin.write('y\n');
-                    }
-
-                    // 認証成功を検知 → 2秒後に自動終了
-                    if (!done && (
-                        str.includes('Authentication succeeded') ||
-                        str.includes('認証が完了') ||
-                        str.includes('Logged in as') ||
-                        str.includes('Login successful')
-                    )) {
-                        done = true;
-                        setTimeout(() => {
-                            try {
-                                if (process.platform === 'win32') {
-                                    spawnSync('taskkill', ['/pid', child.pid, '/f', '/t']);
-                                } else {
-                                    child.kill('SIGKILL');
-                                }
-                            } catch (e) {}
-                            resolve();
-                        }, 2000);
-                    }
-                };
-
-                child.stdout.on('data', checkDone);
-                child.stderr.on('data', checkDone);
-
-                child.on('close', () => {
-                    if (!done) resolve();
-                });
-            });
-        } catch (e) {
-            console.error(e);
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+            console.log(C.yellow('認証スクリプトが見つかりません。スキップします。'));
         }
 
         if (hasCredentials()) console.log(`\n  ${C.green(L().auth_done)}`);
