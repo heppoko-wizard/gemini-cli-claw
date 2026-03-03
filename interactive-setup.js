@@ -370,6 +370,26 @@ async function main() {
 
     fs.writeFileSync(sp, JSON.stringify(settings, null, 2));
 
+    // extension-enablement.json のパスを現在のユーザーのホームディレクトリに書き換え
+    // （Gemini CLI の公式セキュリティポリシーファイル。ハードコードされたパスを動的に置換）
+    process.stdout.write(`  extension-enablement.json のパスを更新... `);
+    try {
+        const extensionsDir = path.join(GEMINI_CREDS_DIR, 'extensions');
+        fs.mkdirSync(extensionsDir, { recursive: true });
+        const enablementPath = path.join(extensionsDir, 'extension-enablement.json');
+        // 既存ファイルがあれば読み込んで既存エントリを保持しつつ更新
+        let enablement = {};
+        try { enablement = JSON.parse(fs.readFileSync(enablementPath, 'utf8')); } catch {}
+        const homeGlob = process.platform === 'win32'
+            ? `${home.replace(/\\/g, '/')}/*`  // Windows: C:/Users/name/*
+            : `${home}/*`;                      // Unix: /home/name/*
+        enablement['enhanced-google-workspace'] = { overrides: [homeGlob] };
+        fs.writeFileSync(enablementPath, JSON.stringify(enablement, null, 2));
+        console.log(C.green('DONE'));
+    } catch (e) {
+        console.log(C.red('FAIL: ' + e.message));
+    }
+
     // ─── 5. Gemini 認証 (同じターミナル内) ───
     if (!hasAuth) {
         console.log(`\n  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
