@@ -91,8 +91,9 @@ async function runAuth() {
                             redirect_uri: redirectUri,
                         });
                         
-                        // ~/.gemini/oauth_creds.json に保存
-                        const targetDir = path.join(os.homedir(), '.gemini');
+                        // GEMINI_CLI_HOME があればそこを優先、なければ os.homedir() の ~/.gemini に保存
+                        const baseDir = process.env.GEMINI_CLI_HOME || os.homedir();
+                        const targetDir = path.join(baseDir, '.gemini');
                         const targetPath = path.join(targetDir, 'oauth_creds.json');
                         if (!fs.existsSync(targetDir)) {
                             fs.mkdirSync(targetDir, { recursive: true });

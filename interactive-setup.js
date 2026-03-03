@@ -406,6 +406,10 @@ async function main() {
                 await new Promise((resolve, reject) => {
                     const child = spawn('node', [authScript], {
                         cwd: PLUGIN_DIR,
+                        env: {
+                            ...process.env,
+                            GEMINI_CLI_HOME: GEMINI_CREDS_DIR
+                        },
                         stdio: 'inherit',
                         shell: false
                     });
