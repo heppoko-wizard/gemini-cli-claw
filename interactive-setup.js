@@ -171,6 +171,14 @@ function run(cmd, args, cwd = PLUGIN_DIR, silent = true) {
     return spawnSync(cmd, args, { cwd, shell: true, stdio: silent ? 'pipe' : 'inherit' }).status === 0;
 }
 
+function openBrowser(url) {
+    const { exec } = require('child_process');
+    const cmd = process.platform === 'win32' ? `start "" "${url}"`
+              : process.platform === 'darwin' ? `open "${url}"`
+              : `xdg-open "${url}"`;
+    try { exec(cmd); } catch {}
+}
+
 function hasCredentials() {
     return ['oauth_creds.json', 'google_accounts.json'].some(f =>
         fs.existsSync(path.join(GEMINI_CREDS_DIR, '.gemini', f))
@@ -253,7 +261,9 @@ async function main() {
     // Bun
     if (!hasBun) {
         process.stdout.write(`  ${L().step_bun}... `);
-        if (process.platform !== 'win32') {
+        if (process.platform === 'win32') {
+            run('powershell', ['-NoProfile', '-Command', "irm bun.sh/install.ps1 | iex"]);
+        } else {
             run('curl', ['-fsSL', 'https://bun.sh/install', '|', 'bash']);
         }
         console.log(C.green('DONE'));
@@ -492,8 +502,8 @@ async function main() {
         }
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
     }
-    // ─── 5.4. Tailscale リモートアクセス設定 (自動) ───
-    if (process.platform === 'linux') {
+    // ─── 5.4. Tailscale リモートアクセス設定 (自動・全OS対応) ───
+    if (process.platform !== 'win32' || spawnSync('winget', ['--version'], { shell: true }).status === 0) {
         console.log(`\n  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
         console.log(`  ${C.bold('🌍 Tailscale リモートアクセスのセットアップ')}`);
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
@@ -520,7 +530,16 @@ async function main() {
             const hasTailscale = !!spawnSync('tailscale', ['version'], { shell: true }).stdout?.toString().trim();
             if (!hasTailscale) {
                 console.log(`  ${C.yellow(lang === 'ja' ? 'Tailscale が見つかりません。インストールしています...' : 'Tailscale not found. Installing...')}`);
-                run('curl', ['-fsSL', 'https://tailscale.com/install.sh', '|', 'sh'], PLUGIN_DIR, false);
+                if (process.platform === 'win32') {
+                    run('winget', ['install', '--silent', 'tailscale.tailscale'], PLUGIN_DIR, false);
+                } else if (process.platform === 'darwin') {
+                    // Homebrew が使えなければ pkg でインストール
+                    if (!run('brew', ['install', 'tailscale'], PLUGIN_DIR)) {
+                        console.log(`  ${C.yellow(lang === 'ja' ? 'Homebrew が見つかりません。Tailscaleの公式サイトからインストーラーを取得してください。' : 'Homebrew not found. Please install Tailscale from https://tailscale.com/download')}`);
+                    }
+                } else {
+                    run('curl', ['-fsSL', 'https://tailscale.com/install.sh', '|', 'sh'], PLUGIN_DIR, false);
+                }
             } else {
                 console.log(`  ${C.green(lang === 'ja' ? '✓ Tailscale は既にインストール済みです。' : '✓ Tailscale is already installed.')}`);
             }
@@ -535,7 +554,10 @@ async function main() {
             } else {
                 // 認証（ログイン）プロセス
                 console.log(`\n  ${C.yellow(tsAuthMsg)}`);
-                const upProcess = spawn('sudo', ['tailscale', 'up', '--reset'], { stdio: ['pipe', 'pipe', 'pipe'] });
+                // macOS/Lin: sudo tailscale up, Win: tailscale up (管理者として実行されていることが前提)
+                const upCmd = process.platform === 'win32' ? 'tailscale' : 'sudo';
+                const upArgs = process.platform === 'win32' ? ['up', '--reset'] : ['tailscale', 'up', '--reset'];
+                const upProcess = spawn(upCmd, upArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
 
                 await new Promise((resolve) => {
                     upProcess.stdout.on('data', (d) => {
@@ -543,7 +565,7 @@ async function main() {
                         const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
                         if (urlMatch) {
                             console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
-                            try { require('child_process').exec(`xdg-open "${urlMatch[1]}"`); } catch {}
+                            openBrowser(urlMatch[1]);
                         }
                     });
                     upProcess.stderr.on('data', (d) => {
@@ -551,7 +573,7 @@ async function main() {
                         const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
                         if (urlMatch) {
                             console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
-                            try { require('child_process').exec(`xdg-open "${urlMatch[1]}"`); } catch {}
+                            openBrowser(urlMatch[1]);
                         }
                     });
                     upProcess.on('close', (code) => {
@@ -566,13 +588,14 @@ async function main() {
                 const ipOut = spawnSync('tailscale', ['ip', '-4'], { shell: true }).stdout?.toString().trim();
                 if (ipOut) tsIp = ipOut.split('\n')[0];
 
-                // UFW 設定（有効な場合のみ）
-                const ufwStatus = spawnSync('sudo', ['ufw', 'status'], { shell: true }).stdout?.toString();
-                if (ufwStatus && ufwStatus.includes('Status: active')) {
-                    console.log(`  ${C.cyan(lang === 'ja' ? 'ファイアウォール（UFW）に許可ルールを追加しています...' : 'Adding firewall allow rule...')}`);
-                    run('sudo', ['ufw', 'allow', 'in', 'on', 'tailscale0', 'to', 'any', 'port', '18789'], PLUGIN_DIR, false);
+                // UFW 設定（Linux かつ有効な場合のみ）
+                if (process.platform === 'linux') {
+                    const ufwStatus = spawnSync('sudo', ['ufw', 'status'], { shell: true }).stdout?.toString();
+                    if (ufwStatus && ufwStatus.includes('Status: active')) {
+                        console.log(`  ${C.cyan(lang === 'ja' ? 'ファイアウォール（UFW）に許可ルールを追加しています...' : 'Adding firewall allow rule...')}`);
+                        run('sudo', ['ufw', 'allow', 'in', 'on', 'tailscale0', 'to', 'any', 'port', '18789'], PLUGIN_DIR, false);
+                    }
                 }
-
                 console.log(`\n  ${C.green(tsDoneMsg)}`);
                 if (tsIp) {
                     console.log(`  ${C.bold('🚀 ' + (lang === 'ja' ? 'スマホ等からのアクセス:' : 'Access from your phone:'))}`);
