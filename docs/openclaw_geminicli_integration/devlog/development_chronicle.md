@@ -595,17 +595,22 @@
 
 ---
 
-## セッション 27: Git 追跡ポリシーの改善と安全性向上
+## セッション 27: Git 追跡ポリシーの完全な適用と安全性向上
 
 ### やったこと
 
-- **.gitignore の最適化**: `gemini-home/.gemini/` ディレクトリ全体を無視していた設定を解除。`settings.json` などの基本設定ファイルは Git で管理・配布できるようにしつつ、`oauth_creds.json` や `google_accounts.json` などの個人認証情報、一時的な `installation_id` や `state.json` のみを確実に除外するように詳細化した。
-- **セッション情報の除外**: 新しく生成される `gemini-session-map.json` や `gemini-sessions/` ディレクトリを `.gitignore` に追加し、プライバシーとセキュリティを強化した。
+- **.gitignore の完全な適用**: 指摘に基づき、セッションに関連するすべてのファイルを `.gitignore` に追加した。具体的には以下のファイルを完全に除外設定とした。
+  - `gemini-home/.gemini/` （`settings.json`, `oauth_creds.json` などを含むディレクトリ全体）
+  - `gemini-home/gemini-session-map.json`
+  - `gemini-home/extensions/extension-enablement.json`
+  - `gemini-home/gemini-sessions/` （セッションデータ）
+- **Git 履歴のクリーンアップ**: 誤って一時的にステージ・コミットされてしまった機密情報ファイルを `git rm --cached` でインデックスから削除し、コミットを修正（amend）して安全な状態を確保した。
 - **リリースパッケージの安全性向上**: `pack_release.sh` が README を親ディレクトリに展開して上書きしてしまう問題を修正。アダプタ専用の README はアダプタディレクトリ内に閉じ込めるように変更し、OpenClaw 本体の README を保護するようにした。
 
 ### 変更したファイル
-- `.gitignore` — 追跡対象（settings.json）と除外対象（認証情報）の選別、セッション情報の除外
+- `.gitignore` — ほぼすべての動的生成ファイルおよび認証情報の完全な除外
 - `pack_release.sh` — README の配置パスをアダプタディレクトリ内に修正
 
 ### コミット
+- `0c924a8f` — refactor(git): ensure all session and credential files are ignored
 - `2da50279` — fix(release): prevent README files from overwriting parent repo when extracted
