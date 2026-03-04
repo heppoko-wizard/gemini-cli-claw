@@ -617,7 +617,26 @@ async function main() {
                         });
                         child.on('close', (code) => {
                             if (code === 0) {
-                                console.log(`\n  ${C.green(GL.done)}`);
+                                // 認証成功後、実際のアカウントアドレスを取得してエイリアスを貼る
+                                try {
+                                    const stRes = spawnSync('gog', ['auth', 'status', '--json'], { shell: true });
+                                    if (stRes.status === 0) {
+                                        const stData = JSON.parse(stRes.stdout.toString());
+                                        const realEmail = stData.account?.email;
+                                        if (realEmail && realEmail !== email) {
+                                            // 実メール名でエイリアス（実メアド -> default@openclaw）を張って直感的に使えるようにする
+                                            spawnSync('gog', ['auth', 'alias', 'set', realEmail, email], { shell: true });
+                                            // ターミナルの表示用
+                                            console.log(`\n  ${C.green(GL.done)} ${C.dim(`(${realEmail})`)}`);
+                                        } else {
+                                            console.log(`\n  ${C.green(GL.done)}`);
+                                        }
+                                    } else {
+                                        console.log(`\n  ${C.green(GL.done)}`);
+                                    }
+                                } catch (e) {
+                                    console.log(`\n  ${C.green(GL.done)}`);
+                                }
                             } else {
                                 console.log(`\n  ${C.yellow(GL.fail)}`);
                             }
