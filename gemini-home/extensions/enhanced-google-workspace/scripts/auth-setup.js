@@ -34,19 +34,35 @@ const SCOPES = [
   'https://www.googleapis.com/auth/contacts'
 ];
 
+const { OAuthCredentialStorage } = require('../workspace-server/src/auth/token-storage/oauth-credential-storage');
+
 async function runSetup() {
-  console.log('\n--- Google Workspace Setup ---');
-  console.log('認証を開始します。ブラウザを確認してください...');
+  const isCheckMode = process.argv.includes('--check');
 
   try {
+    const creds = await OAuthCredentialStorage.loadCredentials();
+    const hasCreds = creds && creds.refresh_token;
+
+    if (isCheckMode) {
+      if (hasCreds) process.exit(0);
+      else process.exit(1);
+    }
+
+    console.log('\n--- Google Workspace Setup ---');
+    if (hasCreds) {
+      console.log('✅ 既に認証済みです（OSキーチェーンからトークンを取得しました）。');
+      process.exit(0);
+    }
+
+    console.log('認証を開始します。ブラウザを確認してください...');
+
     const authManager = new AuthManager(SCOPES);
-    
-    // 認証フローを開始（未認証ならブラウザが開き、完了まで待機する）
     await authManager.startAuthFlow();
     
     console.log('\n✅ セットアップが完了しました！');
     process.exit(0);
   } catch (error) {
+    if (isCheckMode) process.exit(1);
     console.error('\n❌ エラーが発生しました:', error.message);
     process.exit(1);
   }

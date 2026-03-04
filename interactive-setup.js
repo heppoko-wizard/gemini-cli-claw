@@ -246,8 +246,12 @@ async function main() {
     if (!hasAuth) checks.push({ key: 'auth', label: 'Gemini CLI 認証 (Google ログイン)' });
 
     // Google Workspace 認証
-    const WORKSPACE_TOKEN_CHECK = path.join(PLUGIN_DIR, 'gemini-home', 'extensions', 'enhanced-google-workspace', 'gemini-cli-workspace-token.json');
-    const hasWorkspace = fs.existsSync(WORKSPACE_TOKEN_CHECK);
+    const WORKSPACE_EXT_DIR = path.join(PLUGIN_DIR, 'gemini-home', 'extensions', 'enhanced-google-workspace');
+    const WORKSPACE_AUTH_SCRIPT = path.join(WORKSPACE_EXT_DIR, 'scripts', 'auth-setup.js');
+    let hasWorkspace = false;
+    if (fs.existsSync(WORKSPACE_AUTH_SCRIPT)) {
+        hasWorkspace = spawnSync('node', [WORKSPACE_AUTH_SCRIPT, '--check'], { stdio: 'ignore' }).status === 0;
+    }
     console.log(`  ${hasWorkspace ? C.green(`${L().found} Google Workspace 認証`) : C.yellow(`${L().not_found} Google Workspace 認証 ${lang === 'ja' ? '(任意・セットアップ中に設定可能)' : '(optional - configurable during setup)'}`)}`);
 
     // Tailscale
@@ -450,14 +454,17 @@ async function main() {
     }
 
     // ─── 5.3. Google Workspace 認証 (任意) ───
-    const WORKSPACE_EXT_DIR = path.join(PLUGIN_DIR, 'gemini-home', 'extensions', 'enhanced-google-workspace');
-    const WORKSPACE_AUTH_SCRIPT = path.join(WORKSPACE_EXT_DIR, 'scripts', 'auth-setup.js');
-    const WORKSPACE_TOKEN_FILE = path.join(WORKSPACE_EXT_DIR, 'gemini-cli-workspace-token.json');
-
-    const hasWorkspaceAuth = fs.existsSync(WORKSPACE_TOKEN_FILE);
+    // const WORKSPACE_EXT_DIR = ... (上で定義済み)
+    // const WORKSPACE_AUTH_SCRIPT = ...
     const workspaceExtExists = fs.existsSync(WORKSPACE_AUTH_SCRIPT);
+    
+    // 実際にキーチェーン/ファイルに認証情報があるかチェック
+    let isWsAuthenticated = false;
+    if (workspaceExtExists) {
+        isWsAuthenticated = spawnSync('node', [WORKSPACE_AUTH_SCRIPT, '--check'], { stdio: 'ignore' }).status === 0;
+    }
 
-    if (!hasWorkspaceAuth) {
+    if (!isWsAuthenticated) {
         const wsAuthLabels = {
             ja: {
                 q: '📊 Google Workspace（Gmail / Drive / Calendar）との連携を有効にしますか？',
