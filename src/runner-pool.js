@@ -109,14 +109,10 @@ class RunnerPool {
         if (this.isSpawning) return;
         this.isSpawning = true;
         
-        console.log("[Pool] Spawning a new warm standby runner...");
-        const runnerPath = path.resolve(__dirname, 'runner.js');
+        console.log("[Pool] Spawning a new warm standby runner (Node.js)...");
+        const runnerPath = path.resolve(__dirname, 'runner.mjs');
         
-        let execCmd = 'bun';
-        const bunPath = path.join(os.homedir(), '.bun', 'bin', 'bun');
-        if (fs.existsSync(bunPath)) {
-            execCmd = bunPath; // PATHが通っていない場合のための絶対パス指定
-        }
+        const execCmd = 'node';
 
         const runner = spawn(execCmd, [runnerPath, '--approval-mode=yolo', '--sandbox=false', '-o', 'stream-json'], {
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -143,9 +139,9 @@ class RunnerPool {
             }
         });
         
-        runner.once('exit', (code) => {
+        runner.once('exit', (code, signal) => {
             // プロセスが終了（使い捨て完了）したら次のプロセスを補充する
-            console.log(`[Pool] Runner consumed (exited with code ${code}). Spawning next...`);
+            console.log(`[Pool] Runner consumed (exited with code ${code}, signal ${signal}). Spawning next...`);
             this.readyRunner = null;
             this.isSpawning = false; // エラー落ちなどでフラグが残るのを防ぐ
             this.spawnNewRunner();
@@ -153,53 +149,6 @@ class RunnerPool {
 
         runner.on('error', (err) => {
             console.error("[Pool] Runner process error:", err);
-            this.isSpawning = false;
-            
-            // Bun起動失敗時のフォールバック (Node.js)
-            if (err.code === 'ENOENT' && execCmd.includes('bun')) {
-                console.log("[Pool] Bun runtime not found. Falling back to Node.js.");
-                this.spawnNewRunnerWithNode();
-            }
-        });
-    }
-
-    spawnNewRunnerWithNode() {
-        if (this.isSpawning) return;
-        this.isSpawning = true;
-        
-        console.log("[Pool] Spawning runner (Node.js fallback)...");
-        const runnerPath = path.resolve(__dirname, 'runner.js');
-        const runner = spawn('node', [runnerPath, '--approval-mode=yolo', '--sandbox=false', '-o', 'stream-json'], {
-            stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-            cwd: this.workspaceCwd,
-            env: {
-                ...process.env,
-                GEMINI_CLI_HOME: this.isolatedGeminiHome,
-            }
-        });
-        
-        runner.once('message', (msg) => {
-            if (msg.type === 'ready') {
-                this.isSpawning = false;
-                console.log("[Pool] Runner is ready to accept requests (Node fallback).");
-                if (this.pendingRequests.length > 0) {
-                    const req = this.pendingRequests.shift();
-                    this.assignRunner(runner, req);
-                } else {
-                    this.readyRunner = runner;
-                }
-            }
-        });
-        
-        runner.once('exit', (code) => {
-            console.log(`[Pool] Runner (Node fallback) consumed (exited with code ${code}).`);
-            this.readyRunner = null;
-            this.isSpawning = false;
-            this.spawnNewRunnerWithNode();
-        });
-
-        runner.on('error', (err) => {
-            console.error("[Pool] Runner process error (Node fallback):", err);
             this.isSpawning = false;
         });
     }

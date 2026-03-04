@@ -325,7 +325,23 @@ async function main() {
                 }
             }
         } catch {}
-        if (!ok) run('git', ['clone', '--depth', '1', 'https://github.com/openclaw/openclaw.git', `"${OPENCLAW_ROOT}"`], OPENCLAW_ROOT);
+        if (!ok) {
+            const tmpGit = path.join(OPENCLAW_ROOT, '_oc_git');
+            try { fs.rmSync(tmpGit, { recursive: true, force: true }); } catch {}
+            if (run('git', ['clone', '--depth', '1', 'https://github.com/openclaw/openclaw.git', `"${tmpGit}"`], OPENCLAW_ROOT)) {
+                try {
+                    const entries = fs.readdirSync(tmpGit);
+                    for (const e of entries) {
+                        if (e === '.git') continue;
+                        fs.cpSync(path.join(tmpGit, e), path.join(OPENCLAW_ROOT, e), { recursive: true });
+                    }
+                    fs.rmSync(tmpGit, { recursive: true, force: true });
+                    ok = true;
+                } catch (err) {
+                    console.log(`\n  ${C.yellow('Warning:')} Failed to copy files from downloaded git repo: ${err}`);
+                }
+            }
+        }
         console.log(C.green('DONE'));
     }
 

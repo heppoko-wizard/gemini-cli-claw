@@ -278,9 +278,9 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
         runner.stderr.on('data', chunk => { stderr += chunk.toString('utf-8'); });
 
         // 3. プロセスが終了したら完了レスポンスを送る
-        runner.on('close', code => {
+        runner.on('close', (code, signal) => {
             const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
-            log(`[perf] Runner process closed with code ${code}. Total duration: ${totalDur}s`);
+            log(`[perf] Runner process closed with code ${code}, signal ${signal}. Total duration: ${totalDur}s`);
             if (stderr.trim()) log(`Runner stderr: ${stderr.trim().substring(0, 300)}`);
 
             // Send completion chunk
