@@ -577,25 +577,35 @@ async function main() {
                 }
 
                 try {
-                    await new Promise((resolve) => {
-                        const authArgs = ['auth', 'add', '--auto-open-browser'];
+                    // メールアドレス入力
+                    const emailPrompt = lang === 'ja'
+                        ? 'Google アカウントのメールアドレスを入力してください:'
+                        : 'Enter your Google account email address:';
+                    const email = await question(emailPrompt);
+                    if (!email || !email.includes('@')) {
+                        console.log(`\n  ${C.yellow(GL.fail)}`);
+                    } else {
+                        const authArgs = ['auth', 'add', email, '--services=all', '--force-consent'];
                         if (secretFile) {
-                            authArgs.push('--client-secret-file', secretFile);
+                            // credentials.json が見つかった場合はクライアント情報を充てる
+                            // gogcliは環境変数 GOGCLI_CLIENT_ID/SECRET を参照するので、.bashrcに記载済み
+                            console.log(`  ${C.dim('既存OAuth設定（bashrcのGOGCLI_CLIENT_ID）が利用されます')}`);
                         }
-
-                        const child = spawn('gog', authArgs, {
-                            stdio: 'inherit',
-                            shell: true,
+                        await new Promise((resolve) => {
+                            const child = spawn('gog', authArgs, {
+                                stdio: 'inherit',
+                                shell: true,
+                            });
+                            child.on('close', (code) => {
+                                if (code === 0) {
+                                    console.log(`\n  ${C.green(GL.done)}`);
+                                } else {
+                                    console.log(`\n  ${C.yellow(GL.fail)}`);
+                                }
+                                resolve();
+                            });
                         });
-                        child.on('close', (code) => {
-                            if (code === 0) {
-                                console.log(`\n  ${C.green(GL.done)}`);
-                            } else {
-                                console.log(`\n  ${C.yellow(GL.fail)}`);
-                            }
-                            resolve();
-                        });
-                    });
+                    }
                 } catch (e) {
                     console.log(`\n  ${C.yellow(GL.fail)}`);
                 }
