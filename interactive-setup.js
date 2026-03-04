@@ -492,6 +492,103 @@ async function main() {
         }
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
     }
+    // ─── 5.4. Tailscale リモートアクセス設定 (自動) ───
+    if (process.platform === 'linux') {
+        console.log(`\n  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
+        console.log(`  ${C.bold('🌍 Tailscale リモートアクセスのセットアップ')}`);
+        console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
+
+        const tsMsg = lang === 'ja'
+            ? 'OpenClawとスマホなどからコミュニケーションが取れるように Tailscale をインストールします。'
+            : 'Installing Tailscale so you can access OpenClaw from your phone and other devices.';
+        const tsAuthMsg = lang === 'ja'
+            ? 'ブラウザが自動で開くので、お使いの Google アカウントでログインしてください。'
+            : 'A browser will open automatically. Please log in with your Google account.';
+        const tsDoneMsg = lang === 'ja'
+            ? '✓ Tailscale リモートアクセスが有効化されました！'
+            : '✓ Tailscale remote access enabled!';
+        const tsFailMsg = lang === 'ja'
+            ? '✗ Tailscale のセットアップに失敗しました。後から手動で設定できます。'
+            : '✗ Tailscale setup failed. You can configure it manually later.';
+
+        console.log(`\n  ${C.cyan(tsMsg)}`);
+
+        let tsSuccess = false;
+        let tsIp = '';
+        try {
+            // インストールチェック
+            const hasTailscale = !!spawnSync('tailscale', ['version'], { shell: true }).stdout?.toString().trim();
+            if (!hasTailscale) {
+                console.log(`  ${C.yellow(lang === 'ja' ? 'Tailscale が見つかりません。インストールしています...' : 'Tailscale not found. Installing...')}`);
+                run('curl', ['-fsSL', 'https://tailscale.com/install.sh', '|', 'sh'], PLUGIN_DIR, false);
+            } else {
+                console.log(`  ${C.green(lang === 'ja' ? '✓ Tailscale は既にインストール済みです。' : '✓ Tailscale is already installed.')}`);
+            }
+
+            // 既にログイン済みかチェック
+            const tsStatus = spawnSync('tailscale', ['status'], { shell: true });
+            const alreadyConnected = tsStatus.status === 0;
+
+            if (alreadyConnected) {
+                console.log(`  ${C.green(lang === 'ja' ? '✓ Tailscale は既にログイン済みです。' : '✓ Tailscale is already logged in.')}`);
+                tsSuccess = true;
+            } else {
+                // 認証（ログイン）プロセス
+                console.log(`\n  ${C.yellow(tsAuthMsg)}`);
+                const upProcess = spawn('sudo', ['tailscale', 'up', '--reset'], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+                await new Promise((resolve) => {
+                    upProcess.stdout.on('data', (d) => {
+                        const s = d.toString();
+                        const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
+                        if (urlMatch) {
+                            console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
+                            try { require('child_process').exec(`xdg-open "${urlMatch[1]}"`); } catch {}
+                        }
+                    });
+                    upProcess.stderr.on('data', (d) => {
+                        const s = d.toString();
+                        const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
+                        if (urlMatch) {
+                            console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
+                            try { require('child_process').exec(`xdg-open "${urlMatch[1]}"`); } catch {}
+                        }
+                    });
+                    upProcess.on('close', (code) => {
+                        tsSuccess = code === 0;
+                        resolve();
+                    });
+                });
+            }
+
+            if (tsSuccess) {
+                // IP取得
+                const ipOut = spawnSync('tailscale', ['ip', '-4'], { shell: true }).stdout?.toString().trim();
+                if (ipOut) tsIp = ipOut.split('\n')[0];
+
+                // UFW 設定（有効な場合のみ）
+                const ufwStatus = spawnSync('sudo', ['ufw', 'status'], { shell: true }).stdout?.toString();
+                if (ufwStatus && ufwStatus.includes('Status: active')) {
+                    console.log(`  ${C.cyan(lang === 'ja' ? 'ファイアウォール（UFW）に許可ルールを追加しています...' : 'Adding firewall allow rule...')}`);
+                    run('sudo', ['ufw', 'allow', 'in', 'on', 'tailscale0', 'to', 'any', 'port', '18789'], PLUGIN_DIR, false);
+                }
+
+                console.log(`\n  ${C.green(tsDoneMsg)}`);
+                if (tsIp) {
+                    console.log(`  ${C.bold('🚀 ' + (lang === 'ja' ? 'スマホ等からのアクセス:' : 'Access from your phone:'))}`);
+                    console.log(`     ${C.cyan(`http://${tsIp}:18789`)}`);
+                    console.log(`  ${C.gray(lang === 'ja'
+                        ? '※ 初回は「npm run openclaw -- dashboard」で表示されるToken付きURLを使用してください。'
+                        : '※ For first access, use the tokenized URL from "npm run openclaw -- dashboard".')}\n`);
+                }
+            } else {
+                console.log(`\n  ${C.yellow(tsFailMsg)}`);
+            }
+        } catch (e) {
+            console.log(`\n  ${C.yellow(tsFailMsg)}: ${e.message}`);
+        }
+        console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
+    }
 
     // ─── 5.5. 自動起動設定確認 (矢印) ───
     const autoIdx = await select([L().autostart_yes, L().autostart_no], L().autostart_q);
