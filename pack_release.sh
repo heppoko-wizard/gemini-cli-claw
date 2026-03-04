@@ -29,7 +29,7 @@ echo "Copying root level scripts and READMEs..."
 cp "$ADAPTER_DIR/setup-openclaw-gemini-cli-adapter.sh" "$STAGE_ROOT/setup-openclaw-gemini-cli-adapter.sh"
 cp "$ADAPTER_DIR/setup-openclaw-gemini-cli-adapter.bat" "$STAGE_ROOT/setup-openclaw-gemini-cli-adapter.bat"
 cp "$ADAPTER_DIR/interactive-setup.js" "$STAGE_ROOT/interactive-setup.js"
-cp "$ADAPTER_DIR"/README*.md "$STAGE_ROOT/" 2>/dev/null || true
+cp "$ADAPTER_DIR"/README*.md "$STAGE_ADAPTER/" 2>/dev/null || true
 
 # --- 2. Adapter internal files (plugin folder) ---
 echo "Copying adapter internal files..."
