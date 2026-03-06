@@ -632,3 +632,43 @@
 
 ### コミット
 - `e0b63209` — feat(setup): add automatic Tailscale remote access setup
+
+---
+
+# 2026-03-06 開発ログ
+
+## セッション 29: Tailscale セットアップの修正 — 強制実行からシームレス任意選択へ (2026-03-06)
+
+### やったこと
+- **問題の特定**: セッション 28 で追加した Tailscale セットアップ機能が、以下の理由で新規環境で壊れていた：
+  1. ユーザーにスキップの選択肢がなく、強制実行される仕様だった。
+  2. `sudo tailscale up --reset` の `stdio` が全て `'pipe'` でパイプされていたため、sudo のパスワードプロンプトが表示されず、入力もできずスクリプト全体がフリーズしていた。
+  3. `--reset` フラグにより、既にログイン済みの環境でも認証がリセットされる危険があった。
+  4. 認証プロセスにタイムアウトがなく、ブラウザ認証が完了しない場合に永久にハングする設計だった。
+- **Tailscale CLI の挙動調査**: 以下を確認した。
+  - インストール: `curl -fsSL https://tailscale.com/install.sh | sh` で、内部で `sudo` を使用するため `stdio: 'inherit'` が必須。
+  - 認証: `sudo tailscale up` を実行すると、認証URLが **stdout** に出力される。
+  - デーモン: `tailscaled` は systemd サービスとしてインストール・スクリプトにより自動起動される。
+  - ステータス確認: `tailscale status` が exit code 0 なら接続済み。
+- **`interactive-setup.js` の Tailscale セクション（旧 L653-762）を全面書き換え**:
+  - gogcli セクションと同じ UX パターンに統一し、`select()` UI でスキップ選択肢を追加。
+  - インストールコマンドを `stdio: 'inherit'` で実行し、sudo パスワード入力を可能にした。
+  - `tailscale up` の実行を `stdio: ['inherit', 'pipe', 'pipe']` に変更。stdin は `inherit` で sudo パスワード入力を維持しつつ、stdout/stderr は `pipe` で監視して認証URLを検出・`openBrowser()` で自動オープンする。
+  - `--reset` フラグを削除し、既存認証を維持する安全な設計にした。
+  - 90秒のタイムアウトを追加。タイムアウト時は SIGTERM → 3秒後 SIGKILL でプロセスを安全に終了し、セットアップは続行。
+  - ja/en 両言語のラベルを `tsLabels` オブジェクトに構造化。
+
+### 発見・学んだこと
+- **`stdio` の組み合わせ**: Node.js の `spawn()` では `stdio` を配列で個別指定できる。`['inherit', 'pipe', 'pipe']` とすることで、stdin だけユーザー操作可能にしつつ stdout/stderr をプログラムで監視するハイブリッド構成が可能。
+- **`tailscale up` vs `tailscale login`**: `tailscale up` は認証＋接続を同時に行う。`tailscale login` は認証のみで接続はしない。セットアップでは即座に使えるようにしたいため `tailscale up` が適切。
+- **Tailscale 公式インストールスクリプトの仕様**: `https://tailscale.com/install.sh` は内部で OS 判定・パッケージマネージャ判定を行い、適切なリポジトリ追加＋インストールを全自動で行う。`sudo` を内部で呼ぶため、パイプ元の `stdio` を `'inherit'` にしないとパスワード入力ができない。
+
+### 変更したファイル
+- `interactive-setup.js` — Tailscale セクション（L653-805）を全面書き換え：スキップ選択肢追加、sudo stdio 修正、`--reset` 削除、90秒タイムアウト追加、認証URL 自動オープン
+
+### 追記：WSL2 デフォルト環境（systemd 無効）への対応
+- **追加の問題**: デフォルトの WSL2 環境では `systemd` が PID 1 として動いていないため、`systemctl` を使うデーモン起動（`tailscaled`）が失敗し、認証ステップで「デーモンが動いていない」とエラーになる問題が発生した。
+- **デバッグ過程**: 
+  - `tailscale status` の戻り値が `includes('not running')` では検知できていなかった。実際のエラーメッセージ `"doesn't appear to be running"` に合わせ `includes('appear to be running')` も判定に追加。
+  - `/proc/1/comm` を読み取り、PID 1 が `systemd` でない場合は、`sudo sh -c 'tailscaled > /dev/null 2>&1 &'` で直接バックグラウンド起動するフォールバック処理を実装。
+- **最終結果**: WSL2 環境においても、デーモンの自動起動からブラウザ認証までがシームレスに動作することを確認。

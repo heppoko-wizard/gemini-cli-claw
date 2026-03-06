@@ -176,9 +176,9 @@ function run(cmd, args, cwd = PLUGIN_DIR, silent = true) {
 function openBrowser(url) {
     const { exec } = require('child_process');
     const cmd = process.platform === 'win32' ? `start "" "${url}"`
-              : process.platform === 'darwin' ? `open "${url}"`
-              : `xdg-open "${url}"`;
-    try { exec(cmd); } catch {}
+        : process.platform === 'darwin' ? `open "${url}"`
+            : `xdg-open "${url}"`;
+    try { exec(cmd); } catch { }
 }
 
 function hasCredentials() {
@@ -321,13 +321,13 @@ async function main() {
                         fs.cpSync(inner, OPENCLAW_ROOT, { recursive: true });
                         ok = true;
                     }
-                    try { fs.rmSync(tmp, { recursive: true, force: true }); fs.rmSync(zip); } catch {}
+                    try { fs.rmSync(tmp, { recursive: true, force: true }); fs.rmSync(zip); } catch { }
                 }
             }
-        } catch {}
+        } catch { }
         if (!ok) {
             const tmpGit = path.join(OPENCLAW_ROOT, '_oc_git');
-            try { fs.rmSync(tmpGit, { recursive: true, force: true }); } catch {}
+            try { fs.rmSync(tmpGit, { recursive: true, force: true }); } catch { }
             if (run('git', ['clone', '--depth', '1', 'https://github.com/openclaw/openclaw.git', `"${tmpGit}"`], OPENCLAW_ROOT)) {
                 try {
                     const entries = fs.readdirSync(tmpGit);
@@ -406,8 +406,8 @@ async function main() {
     fs.mkdirSync(settingsDir, { recursive: true });
     const sp = path.join(settingsDir, 'settings.json');
     let settings = {};
-    try { settings = JSON.parse(fs.readFileSync(sp, 'utf8')); } catch {}
-    
+    try { settings = JSON.parse(fs.readFileSync(sp, 'utf8')); } catch { }
+
     // 報告書に基づいたフル権限・安定稼働設定を注入
     settings.model = settings.model || { name: 'auto-gemini-3' };
     settings.general = { ...settings.general, defaultApprovalMode: 'yolo' };
@@ -415,7 +415,7 @@ async function main() {
     settings.security.auth = { ...settings.security.auth, selectedType: 'oauth-personal' };
     settings.security.folderTrust = { enabled: false };
     settings.tools = { ...settings.tools, sandbox: false };
-    
+
     // コンテキストにホームディレクトリを含める（フルアクセス権限）
     const home = os.homedir();
     settings.context = {
@@ -594,7 +594,7 @@ async function main() {
                                 console.log(`  ${C.dim(`既存のOAuthシークレットを検出しました: ${path.basename(p)}`)}`);
                                 break;
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
 
@@ -603,7 +603,7 @@ async function main() {
                     // (実際のGoogleアカウントは開いたブラウザ側で選択可能)
                     const email = 'default@openclaw';
                     console.log(`  ${C.dim('ブラウザが開きます。連携したいGoogleアカウントを選択してください。')}`);
-                    
+
                     const authArgs = ['auth', 'add', email, '--services=all', '--force-consent'];
                     if (secretFile) {
                         // credentials.json が見つかった場合はクライアント情報を充てる
@@ -650,113 +650,201 @@ async function main() {
         }
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
     }
-    // ─── 5.4. Tailscale リモートアクセス設定 (自動・全OS対応) ───
-    if (process.platform !== 'win32' || spawnSync('winget', ['--version'], { shell: true }).status === 0) {
+    // ─── 5.4. Tailscale リモートアクセス設定 (任意・全OS対応) ───
+    {
+        const tsLabels = {
+            ja: {
+                title: '🌍 Tailscale リモートアクセス',
+                desc: 'Tailscale を使うと、スマホや外出先のPCから安全に OpenClaw へアクセスできます。',
+                q: '🌍 Tailscale リモートアクセスを有効にしますか？',
+                yes: 'はい、Tailscale をインストールしてリモートアクセスを有効にする',
+                no: 'いいえ、スキップする（後から手動で設定可能）',
+                installing: 'Tailscale をインストールしています（sudo パスワードが必要な場合があります）...',
+                already_installed: '✓ Tailscale は既にインストール済みです。',
+                already_connected: '✓ Tailscale は既にログイン済みです。',
+                auth_guide: 'ブラウザが自動で開きます。お使いのアカウントでログインしてください。',
+                auth_fallback: '自動で開かない場合は、以下のURLをブラウザに貼り付けてください:',
+                done: '✓ Tailscale リモートアクセスが有効化されました！',
+                fail: '⚠ Tailscale のセットアップに失敗しました。後から手動で設定できます。',
+                timeout: '⚠ 認証がタイムアウトしました。後から sudo tailscale up で再試行できます。',
+                access: 'スマホ等からのアクセス:',
+                token_note: '※ 初回は「npm run openclaw -- dashboard」で表示されるToken付きURLを使用してください。',
+            },
+            en: {
+                title: '🌍 Tailscale Remote Access',
+                desc: 'Tailscale lets you securely access OpenClaw from your phone or other devices.',
+                q: '🌍 Enable Tailscale remote access?',
+                yes: 'Yes, install Tailscale and enable remote access',
+                no: 'No, skip for now (can be set up manually later)',
+                installing: 'Installing Tailscale (sudo password may be required)...',
+                already_installed: '✓ Tailscale is already installed.',
+                already_connected: '✓ Tailscale is already logged in.',
+                auth_guide: 'A browser will open automatically. Please log in with your account.',
+                auth_fallback: 'If it does not open automatically, paste the following URL in your browser:',
+                done: '✓ Tailscale remote access enabled!',
+                fail: '⚠ Tailscale setup failed. You can configure it manually later.',
+                timeout: '⚠ Authentication timed out. You can retry later with sudo tailscale up.',
+                access: 'Access from your phone:',
+                token_note: '※ For first access, use the tokenized URL from "npm run openclaw -- dashboard".',
+            }
+        };
+        const TL = tsLabels[lang];
+
         console.log(`\n  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
-        console.log(`  ${C.bold('🌍 Tailscale リモートアクセスのセットアップ')}`);
+        console.log(`  ${C.bold(TL.title)}`);
+        console.log(`  ${C.dim(TL.desc)}`);
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
 
-        const tsMsg = lang === 'ja'
-            ? 'OpenClawとスマホなどからコミュニケーションが取れるように Tailscale をインストールします。'
-            : 'Installing Tailscale so you can access OpenClaw from your phone and other devices.';
-        const tsAuthMsg = lang === 'ja'
-            ? 'ブラウザが自動で開くので、お使いの Google アカウントでログインしてください。'
-            : 'A browser will open automatically. Please log in with your Google account.';
-        const tsDoneMsg = lang === 'ja'
-            ? '✓ Tailscale リモートアクセスが有効化されました！'
-            : '✓ Tailscale remote access enabled!';
-        const tsFailMsg = lang === 'ja'
-            ? '✗ Tailscale のセットアップに失敗しました。後から手動で設定できます。'
-            : '✗ Tailscale setup failed. You can configure it manually later.';
+        const tsChoice = await select([TL.yes, TL.no], TL.q);
 
-        console.log(`\n  ${C.cyan(tsMsg)}`);
-
-        let tsSuccess = false;
-        let tsIp = '';
-        try {
-            // インストールチェック
-            const hasTailscale = !!spawnSync('tailscale', ['version'], { shell: true }).stdout?.toString().trim();
-            if (!hasTailscale) {
-                console.log(`  ${C.yellow(lang === 'ja' ? 'Tailscale が見つかりません。インストールしています...' : 'Tailscale not found. Installing...')}`);
-                if (process.platform === 'win32') {
-                    run('winget', ['install', '--silent', 'tailscale.tailscale'], PLUGIN_DIR, false);
-                } else if (process.platform === 'darwin') {
-                    // Homebrew が使えなければ pkg でインストール
-                    if (!run('brew', ['install', 'tailscale'], PLUGIN_DIR)) {
-                        console.log(`  ${C.yellow(lang === 'ja' ? 'Homebrew が見つかりません。Tailscaleの公式サイトからインストーラーを取得してください。' : 'Homebrew not found. Please install Tailscale from https://tailscale.com/download')}`);
+        if (tsChoice === 0) {
+            let tsSuccess = false;
+            let tsIp = '';
+            let authTimedOut = false;
+            try {
+                // ── インストール ──
+                const hasTailscale = !!spawnSync('tailscale', ['version'], { shell: true }).stdout?.toString().trim();
+                if (!hasTailscale) {
+                    console.log(`\n  ${C.cyan(TL.installing)}`);
+                    if (process.platform === 'win32') {
+                        spawnSync('winget', ['install', '--silent', 'tailscale.tailscale'], { stdio: 'inherit', shell: true });
+                    } else if (process.platform === 'darwin') {
+                        if (spawnSync('brew', ['install', 'tailscale'], { stdio: 'inherit', shell: true }).status !== 0) {
+                            console.log(`  ${C.yellow(lang === 'ja' ? 'Homebrew が見つかりません。https://tailscale.com/download からインストールしてください。' : 'Homebrew not found. Please install from https://tailscale.com/download')}`);
+                        }
+                    } else {
+                        // Linux: 公式インストールスクリプト (sudo が必要、stdio: inherit でパスワード入力可能)
+                        // パイプ (curl | sh) だと sudo の tty が失われてハングするため、一時ファイルに保存して実行する
+                        const tmpScript = path.join(os.tmpdir(), 'tailscale-install.sh');
+                        spawnSync('curl', ['-fsSL', '-o', tmpScript, 'https://tailscale.com/install.sh']);
+                        spawnSync('sh', [tmpScript], { stdio: 'inherit' });
+                        try { fs.rmSync(tmpScript); } catch { }
                     }
                 } else {
-                    run('curl', ['-fsSL', 'https://tailscale.com/install.sh', '|', 'sh'], PLUGIN_DIR, false);
+                    console.log(`  ${C.green(TL.already_installed)}`);
                 }
-            } else {
-                console.log(`  ${C.green(lang === 'ja' ? '✓ Tailscale は既にインストール済みです。' : '✓ Tailscale is already installed.')}`);
-            }
 
-            // 既にログイン済みかチェック
-            const tsStatus = spawnSync('tailscale', ['status'], { shell: true });
-            const alreadyConnected = tsStatus.status === 0;
+                // ── インストール後の存在確認 ──
+                const postCheck = !!spawnSync('tailscale', ['version'], { shell: true }).stdout?.toString().trim();
+                if (!postCheck) {
+                    throw new Error(lang === 'ja'
+                        ? 'Tailscale のインストールに失敗しました（ネットワークエラーの可能性があります）'
+                        : 'Tailscale installation failed (possibly a network error)');
+                }
 
-            if (alreadyConnected) {
-                console.log(`  ${C.green(lang === 'ja' ? '✓ Tailscale は既にログイン済みです。' : '✓ Tailscale is already logged in.')}`);
-                tsSuccess = true;
-            } else {
-                // 認証（ログイン）プロセス
-                console.log(`\n  ${C.yellow(tsAuthMsg)}`);
-                // macOS/Lin: sudo tailscale up, Win: tailscale up (管理者として実行されていることが前提)
-                const upCmd = process.platform === 'win32' ? 'tailscale' : 'sudo';
-                const upArgs = process.platform === 'win32' ? ['up', '--reset'] : ['tailscale', 'up', '--reset'];
-                const upProcess = spawn(upCmd, upArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+                // ── tailscaled デーモンの起動確認 ──
+                if (process.platform !== 'win32') {
+                    const daemonCheck = spawnSync('tailscale', ['status'], { shell: true, stdio: 'pipe' });
+                    const daemonStderr = daemonCheck.stderr?.toString() || '';
+                    if (daemonCheck.status !== 0 && (daemonStderr.includes('appear to be running') || daemonStderr.includes('not running'))) {
+                        console.log(`  ${C.cyan(lang === 'ja' ? 'tailscaled デーモンを起動しています...' : 'Starting tailscaled daemon...')}`);
 
-                await new Promise((resolve) => {
-                    upProcess.stdout.on('data', (d) => {
-                        const s = d.toString();
-                        const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
-                        if (urlMatch) {
-                            console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
-                            openBrowser(urlMatch[1]);
+                        // PID 1 が systemd かどうかで起動方法を分岐
+                        let pid1 = '';
+                        try { pid1 = fs.readFileSync('/proc/1/comm', 'utf8').trim(); } catch { }
+                        const isSystemd = pid1 === 'systemd';
+
+                        if (isSystemd) {
+                            spawnSync('sudo', ['systemctl', 'daemon-reload'], { stdio: 'inherit' });
+                            spawnSync('sudo', ['systemctl', 'enable', '--now', 'tailscaled'], { stdio: 'inherit' });
+                        } else {
+                            // WSL2 等 systemd 非対応環境: 直接バックグラウンド起動
+                            console.log(`  ${C.dim(lang === 'ja' ? 'systemd が無効のため、直接デーモンを起動します...' : 'systemd not active, starting daemon directly...')}`);
+                            spawnSync('sudo', ['killall', 'tailscaled'], { stdio: 'ignore' });
+                            spawnSync('sudo', ['sh', '-c', 'tailscaled > /dev/null 2>&1 &'], { stdio: 'inherit' });
                         }
-                    });
-                    upProcess.stderr.on('data', (d) => {
-                        const s = d.toString();
-                        const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
-                        if (urlMatch) {
-                            console.log(`\n  🔗 ${C.cyan(urlMatch[1])}`);
-                            openBrowser(urlMatch[1]);
+
+                        // 起動待ち + 確認
+                        spawnSync('sleep', ['3']);
+                        const recheck = spawnSync('tailscale', ['status'], { shell: true, stdio: 'pipe' });
+                        if (recheck.stderr?.toString().includes('appear to be running') || recheck.stderr?.toString().includes('not running')) {
+                            throw new Error(lang === 'ja'
+                                ? 'tailscaled デーモンの起動に失敗しました'
+                                : 'Failed to start tailscaled daemon');
                         }
-                    });
-                    upProcess.on('close', (code) => {
-                        tsSuccess = code === 0;
-                        resolve();
-                    });
-                });
-            }
-
-            if (tsSuccess) {
-                // IP取得
-                const ipOut = spawnSync('tailscale', ['ip', '-4'], { shell: true }).stdout?.toString().trim();
-                if (ipOut) tsIp = ipOut.split('\n')[0];
-
-                // UFW 設定（Linux かつ有効な場合のみ）
-                if (process.platform === 'linux') {
-                    const ufwStatus = spawnSync('sudo', ['ufw', 'status'], { shell: true }).stdout?.toString();
-                    if (ufwStatus && ufwStatus.includes('Status: active')) {
-                        console.log(`  ${C.cyan(lang === 'ja' ? 'ファイアウォール（UFW）に許可ルールを追加しています...' : 'Adding firewall allow rule...')}`);
-                        run('sudo', ['ufw', 'allow', 'in', 'on', 'tailscale0', 'to', 'any', 'port', '18789'], PLUGIN_DIR, false);
                     }
                 }
-                console.log(`\n  ${C.green(tsDoneMsg)}`);
-                if (tsIp) {
-                    console.log(`  ${C.bold('🚀 ' + (lang === 'ja' ? 'スマホ等からのアクセス:' : 'Access from your phone:'))}`);
-                    console.log(`     ${C.cyan(`http://${tsIp}:18789`)}`);
-                    console.log(`  ${C.gray(lang === 'ja'
-                        ? '※ 初回は「npm run openclaw -- dashboard」で表示されるToken付きURLを使用してください。'
-                        : '※ For first access, use the tokenized URL from "npm run openclaw -- dashboard".')}\n`);
+
+                // ── 接続チェック ──
+                const tsStatus = spawnSync('tailscale', ['status'], { shell: true });
+                const alreadyConnected = tsStatus.status === 0;
+
+                if (alreadyConnected) {
+                    console.log(`  ${C.green(TL.already_connected)}`);
+                    tsSuccess = true;
+                } else {
+                    // ── 認証（ログイン）──
+                    console.log(`\n  ${C.yellow(TL.auth_guide)}`);
+                    const upCmd = process.platform === 'win32' ? 'tailscale' : 'sudo';
+                    const upArgs = process.platform === 'win32' ? ['up'] : ['tailscale', 'up'];
+                    // stdin: inherit でsudoパスワード入力可能、stdout/stderr: pipe でURL検出
+                    const upProcess = spawn(upCmd, upArgs, { stdio: ['inherit', 'pipe', 'pipe'] });
+
+                    const AUTH_TIMEOUT_MS = 90_000;
+
+                    await new Promise((resolve) => {
+                        const timer = setTimeout(() => {
+                            authTimedOut = true;
+                            try { upProcess.kill('SIGTERM'); } catch { }
+                            setTimeout(() => {
+                                try { upProcess.kill('SIGKILL'); } catch { }
+                            }, 3000);
+                            resolve();
+                        }, AUTH_TIMEOUT_MS);
+
+                        const handleOutput = (d) => {
+                            const s = d.toString();
+                            // 認証URL以外の通常出力もターミナルに表示
+                            process.stderr.write(C.dim(s));
+                            const urlMatch = s.match(/(https?:\/\/[^\s]+)/);
+                            if (urlMatch) {
+                                console.log(`\n  ${C.dim(TL.auth_fallback)}`);
+                                console.log(`  🔗 ${C.cyan(urlMatch[1])}`);
+                                openBrowser(urlMatch[1]);
+                            }
+                        };
+                        if (upProcess.stdout) upProcess.stdout.on('data', handleOutput);
+                        if (upProcess.stderr) upProcess.stderr.on('data', handleOutput);
+
+                        upProcess.on('close', (code) => {
+                            clearTimeout(timer);
+                            if (!authTimedOut) {
+                                tsSuccess = code === 0;
+                                resolve();
+                            }
+                        });
+                    });
+
+                    if (authTimedOut) {
+                        console.log(`\n  ${C.yellow(TL.timeout)}`);
+                    }
                 }
-            } else {
-                console.log(`\n  ${C.yellow(tsFailMsg)}`);
+
+                if (tsSuccess) {
+                    // IP取得
+                    const ipOut = spawnSync('tailscale', ['ip', '-4'], { shell: true }).stdout?.toString().trim();
+                    if (ipOut) tsIp = ipOut.split('\n')[0];
+
+                    // UFW 設定（Linux かつ有効な場合のみ）
+                    if (process.platform === 'linux') {
+                        const ufwStatus = spawnSync('sudo', ['ufw', 'status'], { stdio: 'pipe', shell: true }).stdout?.toString();
+                        if (ufwStatus && ufwStatus.includes('Status: active')) {
+                            console.log(`  ${C.cyan(lang === 'ja' ? 'ファイアウォール（UFW）に許可ルールを追加しています...' : 'Adding firewall allow rule...')}`);
+                            spawnSync('sudo', ['ufw', 'allow', 'in', 'on', 'tailscale0', 'to', 'any', 'port', '18789'], { stdio: 'inherit', shell: true });
+                        }
+                    }
+                    console.log(`\n  ${C.green(TL.done)}`);
+                    if (tsIp) {
+                        console.log(`  ${C.bold('🚀 ' + TL.access)}`);
+                        console.log(`     ${C.cyan(`http://${tsIp}:18789`)}`);
+                        console.log(`  ${C.gray(TL.token_note)}\n`);
+                    }
+                } else if (!authTimedOut) {
+                    console.log(`\n  ${C.yellow(TL.fail)}`);
+                }
+            } catch (e) {
+                console.log(`\n  ${C.yellow(TL.fail)}: ${e.message}`);
             }
-        } catch (e) {
-            console.log(`\n  ${C.yellow(tsFailMsg)}: ${e.message}`);
         }
         console.log(`  ${C.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
     }
@@ -825,7 +913,7 @@ Comment=Starts OpenClaw Gateway and Gemini CLI Adapter
         const startScript = process.platform === 'win32' ? 'launch.bat' : './launch.sh';
         const shell = process.platform === 'win32' ? 'cmd.exe' : 'bash';
         const shellArg = process.platform === 'win32' ? '/c' : '-c';
-        
+
         // launch.sh / launch.bat が Gateway 起動を待ち、dashboard コマンドで安全にブラウザを開く
         spawnSync(shell, [shellArg, startScript], { cwd: PLUGIN_DIR, stdio: 'inherit' });
     }
