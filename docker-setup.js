@@ -7,7 +7,7 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
-const { clear, logBold, logSuccess, logError, logWarn, C } = require('./scripts/setup/utils/logger');
+const { clear, logBold, logSuccess, logError, logWarn, logDim, C } = require('./scripts/setup/utils/logger');
 const { PROJECT_ROOT } = require('./scripts/setup/utils/docker-env');
 const { L } = require('./scripts/setup/utils/i18n');
 

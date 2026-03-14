@@ -17,6 +17,7 @@
   "type": "commonjs",
   "dependencies": {
     "@google/gemini-cli": "*",
-    "@modelcontextprotocol/sdk": "^1.26.0"
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "qrcode": "^1.5.4"
   }
 }

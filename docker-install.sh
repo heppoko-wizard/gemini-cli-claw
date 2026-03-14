@@ -172,6 +172,25 @@ if [ $SETUP_EXIT_CODE -eq 0 ]; then
     $DOCKER_CMD compose up -d
     
     if [ $? -eq 0 ]; then
+        echo -e "\n  ${C_CYAN}⌛ サーバーの起動を待機しています...${C_RESET}"
+        echo -e "  ${C_YELLOW}⚠ 初回起動や環境によっては、準備が整うまで数分かかる場合があります。${C_RESET}"
+        
+        # Wait for the dashboard (18789) to become available
+        MAX_RETRIES=600
+        RETRY_COUNT=0
+        while ! curl -s http://localhost:18789 > /dev/null; do
+            sleep 1
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo -e "  ${C_RED}⚠ サーバーの起動確認がタイムアウトしました。ログを確認してください。${C_RESET}"
+                break
+            fi
+            # Show progress every 10 seconds to reduce noise during long wait
+            if [ $((RETRY_COUNT % 10)) -eq 0 ]; then
+                echo -e "  ${C_DIM}...まだ準備中です ( ${RETRY_COUNT}s / ${MAX_RETRIES}s )${C_RESET}"
+            fi
+        done
+
         echo -e "\n  ${C_BOLD}${C_GREEN}🎉 セットアップが正常に完了しました！${C_RESET}"
         
         # Ensure files created via sudo docker are owned by the current user
@@ -191,8 +210,19 @@ if [ $SETUP_EXIT_CODE -eq 0 ]; then
             fi
         fi
 
+        # 7. Mobile Onboarding Guide (Host side, after server is ready)
+        # Pass captured Tailscale info to the node script
+        export TAILSCALE_IP="$TAILSCALE_IP"
+        export TAILSCALE_HOSTNAME="$TAILSCALE_HOSTNAME"
+        node -e "require('./scripts/setup/steps/06_mobile')().catch(e => console.error(e))"
+
         echo -e "\n  ${C_BOLD}ダッシュボード: ${C_CYAN}http://localhost:18789${C_RESET}"
-        echo -e "  (Tailscale利用時: ${C_CYAN}http://TailscaleのIP:18789${C_RESET})"
+        
+        # Display the actual Tailscale URL if available
+        TS_DISPLAY_HOST="${TAILSCALE_HOSTNAME:-$TAILSCALE_IP}"
+        if [ -n "$TS_DISPLAY_HOST" ]; then
+            echo -e "  (Tailscale利用時: ${C_CYAN}http://${TS_DISPLAY_HOST}:18789${C_RESET})"
+        fi
         
         echo -e "\n  ${C_GREEN}✓ Container is now running in the background!${C_RESET}"
         echo -e "  To view logs: ${C_CYAN}$DOCKER_CMD logs -f openclaw-gemini-adapter${C_RESET}"
@@ -210,5 +240,3 @@ else
     echo -e "\n  ${C_RED}⚠ Setup was interrupted or failed. Aborting container start.${C_RESET}"
     exit $SETUP_EXIT_CODE
 fi
-
-

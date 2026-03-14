@@ -17,10 +17,10 @@ module.exports = async function runStep() {
     if (tailscaleIp) {
         const label = tailscaleHostname ? `${tailscaleIp} / ${tailscaleHostname}` : tailscaleIp;
         const choice = await select(
-            ['ローカルアクセスのみ (安全)', 'Tailscale経由のリモートアクセスを許可'],
+            ['Tailscale経由のリモートアクセスを許可 (推奨)', 'ローカルアクセスのみ (安全)'],
             `Tailscale ホスト (${label}) が検出されました。アクセスモードを選択してください:`
         );
-        useTailscale = choice === 1;
+        useTailscale = choice === 0;
     }
 
     process.stdout.write(`\n  ${C.dim('設定ファイルを生成・更新中...')} `);

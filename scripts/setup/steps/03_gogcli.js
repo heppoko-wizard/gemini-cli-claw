@@ -121,15 +121,33 @@ module.exports = async function runStep() {
 
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-        console.log(`\n  ${C.yellow('⚠️ 【WSL等で接続拒否になった場合】')}`);
+        console.log(`\n  ${C.yellow('⚠️ 【WSL/SSH等で接続拒否になった場合】')}`);
         console.log(`  ${C.dim('認証完了後にブラウザで "localhost 接続が拒否されました" エラー画面になった場合、')}`);
-        console.log(`  ${C.dim('そのエラー画面のアドレスバーのURL (http://127.0.0.1...) を丸ごとここに貼り付けて Enter を押してください。')}\n`);
+        console.log(`  ${C.dim('そのエラー画面のアドレスバーのURL (http://127.0.0.1...) を丸ごとコピーして')}`);
+        console.log(`  ${C.dim('以下のプロンプトに貼り付けて Enter を押してください。')}\n`);
+
+        process.stdin.resume();
+        const showPrompt = () => {
+            rl.setPrompt(`  ${C.cyan('URL貼り付け待ち')} > `);
+            rl.prompt();
+        };
+        showPrompt();
 
         rl.on('line', (line) => {
             const input = line.trim();
-            if (input.includes('oauth2callback') && input.includes('code=')) {
+            // oauth2callback または oauth2/callback の両方に対応
+            if ((input.includes('oauth2callback') || input.includes('oauth2/callback')) && input.includes('code=')) {
                 logInfo('バイパスURLを検知しました。内部でコールバック通信を実行します...');
-                spawnSync('curl', ['-s', input]);
+                const curlRes = spawnSync('curl', ['-s', '-I', input]);
+                if (curlRes.status === 0) {
+                    logSuccess('✓ コールバック通信を送信しました。gogcli の応答を待っています...');
+                } else {
+                    logError('⚠ コールバック通信に失敗しました。URLが正しいか確認してください。');
+                    showPrompt();
+                }
+            } else if (input) {
+                logWarn('⚠ 有効なコールバックURLではありません。http://127.0.0.1... で始まるURLを貼り付けてください。');
+                showPrompt();
             }
         });
 
