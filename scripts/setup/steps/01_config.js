@@ -46,9 +46,7 @@ module.exports = async function runStep() {
             // validation.ts の validateGatewayTailscaleBind により、tailscale.mode="serve" 時は
             // bind="loopback" が必須。"custom" + "127.0.0.1" も通過するが、loopback が最短形。
             config.gateway.bind = 'loopback';
-            config.gateway.auth.mode = 'token';
-            config.gateway.auth.token = 'openclaw-docker-session';
-            config.gateway.auth.allowTailscale = true;
+            config.gateway.auth.mode = 'none';
 
             config.gateway.tailscale = {
                 mode: 'serve',

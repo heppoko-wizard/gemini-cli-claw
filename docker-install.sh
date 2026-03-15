@@ -229,11 +229,10 @@ if [ $SETUP_EXIT_CODE -eq 0 ]; then
             fi
         fi
 
-        # 7. Mobile Onboarding Guide & Auto-Pairing (Host side, after server is ready)
-        export TAILSCALE_IP="$TAILSCALE_IP"
-        export TAILSCALE_HOSTNAME="$TAILSCALE_HOSTNAME"
-        # Run auto-pairing and mobile guide sequentially
-        node -e "require('./scripts/setup/steps/07_autopair')().then(() => require('./scripts/setup/steps/06_mobile')()).catch(e => console.error(e))"
+        # 7. Mobile Onboarding Guide
+        # 認証なし（auth.mode=none）構成のため、デバイス承認は不要。
+        # 直接モバイルガイドを表示するか、ダッシュボードへの案内を行います。
+        node -e "require('./scripts/setup/steps/06_mobile')().catch(e => console.error(e))"
 
         echo -e "\n  ${C_BOLD}ダッシュボード: ${C_CYAN}http://localhost:18789${C_RESET}"
         

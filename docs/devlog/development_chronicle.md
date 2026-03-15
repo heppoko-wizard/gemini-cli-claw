@@ -1144,12 +1144,10 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
 1. **真のスキーマ（一次情報）の特定**:
     - `strict-investigator` スキルを用い、実際にテストアクセスを実施してから `openclaw devices list --json` コマンドを実行。
     - 過去のコードが参照していた `dev.name` や `dev.status` は**存在せず**、サーバーへの承認リクエストに必要なのは `deviceId` ではなく `requestId` であることを突き止めた。
-    - また、自動承認のトリガーは「ブラウザからのアクセス」自体ではなく、「Connect ボタンを押すこと」であることも確認。
-2. **推測・隠蔽的フォールバックの一掃**:
-    - 「キーが変わったかもしれない」というLLMの推論によって追加されていた、無意味なフォールバック（`dev.name || dev.deviceId` 等）をすべて削除。
-    - 実際に存在する `dev.platform` や `dev.clientId` を表示するように変更し、エラー握りつぶしがないクリーンなロジックに刷新。
-3. **疎通・ログインの成功確認**:
-    - 自動承認を一旦スキップし、手動で `openclaw devices approve <requestId>` を実行したところ、正常に認可が通り、スマホブラウザから正しくログイン（ダッシュボード表示）できることを確認した。
+2. **推論の排除と「ノールック・ログイン」の発明**:
+    - AIの勝手な推測（Tailscale環境では token 認証が必須であるという思い込み）を排除し、OpenClaw 本体の `validation.ts` を直接調査。
+    - `auth.mode: none` が Tailscale 下でも有効であることを突き止め、ペアリングプロセスを丸ごとバイパスする「ノールック・ログイン」へ方針転換。
+    - 不要になった `07_autopair.js` を物理削除し、セットアップフローを劇的に高速化・簡略化した。
 
 ### 副次的な成果：失敗録の恒久化と「教訓コンパイラ」の構築
 今回の「推論実装によってバグの真因を覆い隠してしまった」という、LLMエージェント特有の痛恨のアンチパターンを後世に残すため、以下の仕組みを構築した。
@@ -1159,7 +1157,8 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
     - スキルの裏側に Node.js のコンパイラスクリプト（`scripts/compile.js`）を組み込み、文書を作成した瞬間に全教訓のメタデータが `SKILL.md` の末尾に自動追記される「全自動の自己進化システム」を完成させた。
 
 ### 変更したファイル
-- `scripts/setup/steps/07_autopair.js` — スキーマ追従と不要フォールバックの削除
-- `docs/devlog/development_chronicle.md` — 今回のログ追記
+- `scripts/setup/steps/01_config.js` — 認証モードを `none` に変更
+- `scripts/setup/steps/07_autopair.js` — [DELETE] 認証バイパスにより不要になったため削除
+- `docker-install.sh` — サーバー起動後の承認ステップを削除し高速化
 - `docs/failures/001_autopair_schema_mismatch.md` — 第一号失敗録の作成
 - `.gemini/antigravity/skills/learn-from-failures/` — 新スキルの構築とコンパイラスクリプトの作成
