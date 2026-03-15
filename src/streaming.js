@@ -262,11 +262,61 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         }
                     }
 
+                    // --- SSoT 4.2: プレーンテキスト・ポインタのスキャン (ZWC 廃止後の新形式) ---
+                    // [id:xxx] => tool_use, [res:xxx] => tool_result として処理する
+                    const idPattern = /\[id:([^\]]+)\]/g;
+                    const resPattern = /\[res:([^\]]+)\]/g;
+                    let ptMatch;
+                    while ((ptMatch = idPattern.exec(text)) !== null) {
+                        const toolId = ptMatch[1];
+                        if (!toolCalls.find(tc => tc.id === toolId)) {
+                            const contextPath = path.join(__dir, 'logs', 'contexts', sessionKey || 'default', `tool_use_${toolId}.json`);
+                            try {
+                                if (fs.existsSync(contextPath)) {
+                                    const actualUse = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
+                                    toolCalls.push({
+                                        id: actualUse.tool_id,
+                                        name: actualUse.tool_name,
+                                        args: actualUse.parameters || {},
+                                        status: 'success',
+                                        timestamp: timestamp
+                                    });
+                                }
+                            } catch (e) {
+                                log(`[adapter] ⚠️ [SSoT 4.2] Failed to rehydrate tool_use ${toolId}: ${e.message}`);
+                            }
+                        }
+                    }
+                    while ((ptMatch = resPattern.exec(text)) !== null) {
+                        const toolId = ptMatch[1];
+                        const contextPath = path.join(__dir, 'logs', 'contexts', sessionKey || 'default', `tool_${toolId}.json`);
+                        try {
+                            if (fs.existsSync(contextPath)) {
+                                const actualResult = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
+                                const targetCall = toolCalls.find(tc => tc.id === toolId);
+                                if (targetCall && !targetCall.result) {
+                                    targetCall.result = [{
+                                        functionResponse: {
+                                            name: targetCall.name,
+                                            response: {
+                                                output: actualResult.output || (actualResult.error ? JSON.stringify(actualResult.error) : 'success')
+                                            }
+                                        }
+                                    }];
+                                }
+                            }
+                        } catch (e) {
+                            log(`[adapter] ⚠️ [SSoT 4.2] Failed to rehydrate tool_result ${toolId}: ${e.message}`);
+                        }
+                    }
+
                     // 抽出が終わったら、ゴミテキストを完全に消去する。
                     // 壊れた ZWC の残骸も含め、全てのゼロ幅文字(\u200B-\u200D)を物理的に除去する。
                     let cleanText = text.replace(/[\u200B\u200C\u200D]/g, '');
-                    cleanText = cleanText.replace(/⚙️ Using tool \[.*?\] \.\.\./g, '');
-                    cleanText = cleanText.replace(/[✅❌] Tool (finished|failed)[^\n]*/g, '');
+                    // SSoT 4.2: アダプターが付与した表示行（中黒/タブ付き）を完全削除
+                    // 3. アダプターの表示行 (⚙️ Using tool..., ✅ Tool finished...) を削除 (中黒/全角スペース付き、ID付きも含む)
+                    cleanText = cleanText.replace(/\n*·?[ \t　]*⚙️ Using tool \[.*\] \[id:.*\] \.\.\.\n*/g, '');
+                    cleanText = cleanText.replace(/\n?[ \t]*·?[ \t]*[✅❌] Tool (finished|failed)[^\n]*/g, '');
                     cleanText = cleanText.trim();
 
                     // Gemini用メッセージオブジェクトの構築
@@ -332,6 +382,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         let buffer = '';
         let fullText = '';
+        let lastWasTool = false; // SSoT 4.2: ツールと地の文の間に改行を入れるための状態管理
 
         // 2. 標準出力をパースし、SSEでストリーミング
         runner.stdout.on('data', chunk => {
@@ -382,6 +433,14 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                                     log(`[perf] Time To First Token: ${((perfFirstToken - perfStart) / 1000).toFixed(2)}s`);
                                 }
                                 fullText += json.content;
+
+                                // SSoT 4.2: 直前がツール出力だった場合、地の文との間に改行を挟む
+                                let finalContent = json.content;
+                                if (lastWasTool && json.content.trim()) {
+                                    finalContent = '\n' + json.content;
+                                    lastWasTool = false;
+                                }
+
                                 sseWrite(res, {
                                     id: responseId,
                                     object: 'chat.completion.chunk',
@@ -389,7 +448,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                                     model: 'gemini',
                                     choices: [{
                                         index: 0,
-                                        delta: { content: json.content },
+                                        delta: { content: finalContent },
                                         finish_reason: null
                                     }]
                                 });
@@ -413,15 +472,9 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             log(`[adapter] Failed to save context for tool_use ${json.tool_id}: ${e.message}`);
                         }
 
-                        // OpenClawへ送るZWCは「ポインタ情報」のみに絞る
-                        const pointer = {
-                            type: 'tool_use_pointer',
-                            tool_id: json.tool_id,
-                            sessionKey: sessionKey,
-                            timestamp: json.timestamp
-                        };
-                        const metadataStr = encodeZwc(JSON.stringify(pointer));
-
+                        // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
+                        // 全角スペース (　) を使用することでレンダラーによるトリミングを回避し、確実にインデントさせる
+                        lastWasTool = true;
                         sseWrite(res, {
                             id: responseId,
                             object: 'chat.completion.chunk',
@@ -429,7 +482,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             model: 'gemini',
                             choices: [{
                                 index: 0,
-                                delta: { content: `\n\n⚙️ Using tool [${json.tool_name}] ...\n${metadataStr}\n` },
+                                delta: { content: `\n\n·　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
                                 finish_reason: null
                             }]
                         });
@@ -466,15 +519,9 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             log(`[adapter] Failed to save context for ${json.tool_id}: ${e.message}`);
                         }
 
-                        // OpenClawへ送るZWCは「ポインタ情報」のみに絞り、劇的に軽量化する
-                        const pointer = {
-                            type: 'tool_result_pointer',
-                            tool_id: json.tool_id,
-                            sessionKey: sessionKey,
-                            timestamp: json.timestamp
-                        };
-                        const metadataStr = encodeZwc(JSON.stringify(pointer));
-
+                        // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
+                        // 全角スペースインデント。空白行削除のため末尾改行なし。
+                        lastWasTool = true;
                         sseWrite(res, {
                             id: responseId,
                             object: 'chat.completion.chunk',
@@ -482,7 +529,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             model: 'gemini',
                             choices: [{
                                 index: 0,
-                                delta: { content: `${toolMsg}\n${metadataStr}\n\n` },
+                                delta: { content: `\n·　　${toolMsg} [res:${json.tool_id}]` },
                                 finish_reason: null
                             }]
                         });
