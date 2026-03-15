@@ -23,6 +23,7 @@ async function main() {
         await require('./scripts/setup/steps/02_gemini')();
         await require('./scripts/setup/steps/03_gogcli')();
         await require('./scripts/setup/steps/05_workspace')();
+        // Step 06 (Mobile QR) and 07 (Auto-Pair) are called after server startup in docker-install.sh
     } catch (e) {
         logError('\n⚠ 致命的なエラーが発生し、セットアップが中断されました:');
         console.error(e);

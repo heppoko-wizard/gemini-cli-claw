@@ -6,7 +6,7 @@
 # ==========================================
 FROM node:24-bookworm
 
-# PID 1 ハング対策の tini と、証明書/暗号・ネイティブビルド用ツール一式を確実に導入
+# PID 1 ハング対策의 tini と、証明書/暗号・ネイティブビルド用ツール一式を確実に導入
 # C++17対応のgcc, cmake, git, python3 は sqlite-vec や node-pty のコンパイルで必須
 # Playwright等の依存ライブラリもフルイメージのためほぼ充足しているが、念のため基本的な共有ライブラリ(nss3等)も明記
 # ※ WSL等の不安定なDockerネットワーク環境に対処するため、apt-getにリトライとフォールバック処理を付与して強行突破する
@@ -27,6 +27,9 @@ RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com
 # Google Workspace操作用のgogcliバイナリを取得し、PATHが通る場所に配置 (バージョン固定)
 RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz" | tar xz -C /usr/local/bin gog
 
+# Tailscale バイナリの導入 (OpenClaw native Serve 統合に必須)
+RUN curl -fsSL https://tailscale.com/install.sh | sh
+
 # 軽量プロセスマネージャー(Bun)環境構築
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
@@ -35,8 +38,8 @@ ENV PATH="/root/.bun/bin:${PATH}"
 ENV NPM_CONFIG_PREFIX=/root/.npm-global
 ENV PATH="/root/.npm-global/bin:${PATH}"
 
-# 【最重関門】ネイティブビルドを伴う巨大パッケージ OpenClaw のグローバルインストール
-RUN npm install -g openclaw@2026.3.8
+# 【最重関門】ネイティブビルドを伴う最新版 OpenClaw (v2026.3.13) のグローバルインストール
+RUN npm install -g openclaw@2026.3.13
 
 WORKDIR /app
 

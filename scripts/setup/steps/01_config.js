@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { C, logDim, logSuccess, logError } = require('../utils/logger');
+const { C, logDim, logSuccess, logError, logInfo, logBold } = require('../utils/logger');
 const { OPENCLAW_CONFIG, GEMINI_CREDS_DIR, PROJECT_ROOT } = require('../utils/docker-env');
 const { select } = require('../utils/prompt');
 
@@ -16,9 +16,11 @@ module.exports = async function runStep() {
     let useTailscale = false;
     if (tailscaleIp) {
         const label = tailscaleHostname ? `${tailscaleIp} / ${tailscaleHostname}` : tailscaleIp;
+        logBold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        logInfo(`Tailscale ネットワークを検出しました: ${label}`);
         const choice = await select(
-            ['Tailscale経由のリモートアクセスを許可 (推奨)', 'ローカルアクセスのみ (安全)'],
-            `Tailscale ホスト (${label}) が検出されました。アクセスモードを選択してください:`
+            ['Tailscale Serve (HTTPS) を有効にする (推奨)', 'ローカルアクセスのみ (安全)'],
+            `アクセスモードを選択してください:`
         );
         useTailscale = choice === 0;
     }
@@ -30,6 +32,7 @@ module.exports = async function runStep() {
         if (fs.existsSync(OPENCLAW_CONFIG)) {
             try { config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf8')); } catch (e) { }
         }
+        
         config.agents = config.agents || {};
         config.agents.defaults = config.agents.defaults || {};
         config.agents.defaults.model = 'gemini-adapter/auto-gemini-3';
@@ -39,29 +42,29 @@ module.exports = async function runStep() {
         config.gateway.auth = config.gateway.auth || {};
 
         if (useTailscale) {
-            config.gateway.bind = 'tailnet';
+            // 【黄金律】Tailscale Serve (HTTPS) 構成
+            // validation.ts の validateGatewayTailscaleBind により、tailscale.mode="serve" 時は
+            // bind="loopback" が必須。"custom" + "127.0.0.1" も通過するが、loopback が最短形。
+            config.gateway.bind = 'loopback';
             config.gateway.auth.mode = 'token';
             config.gateway.auth.token = 'openclaw-docker-session';
-            config.gateway.controlUi = config.gateway.controlUi || {};
-            config.gateway.controlUi.allowedOrigins = config.gateway.controlUi.allowedOrigins || [];
-            
-            // IP アドレスとホスト名 (MagicDNS) の両方を許可リストに追加
-            const origins = [];
-            if (tailscaleIp) origins.push(`http://${tailscaleIp}:18789`);
-            if (tailscaleHostname) {
-                origins.push(`http://${tailscaleHostname}:18789`);
-                origins.push(`https://${tailscaleHostname}`); // HTTPS (Tailscale HTTPS) 用
-            }
+            config.gateway.auth.allowTailscale = true;
 
-            origins.forEach(origin => {
-                if (!config.gateway.controlUi.allowedOrigins.includes(origin)) {
-                    config.gateway.controlUi.allowedOrigins.push(origin);
-                }
-            });
+            config.gateway.tailscale = {
+                mode: 'serve',
+                resetOnExit: true
+            };
+
+            config.gateway.controlUi = config.gateway.controlUi || {};
+            config.gateway.controlUi.allowedOrigins = ["*"]; // Tailscaleドメインを許容
+
         } else {
             config.gateway.bind = 'loopback';
             config.gateway.auth.mode = 'none';
+            // Tailscale関連設定をクリーンアップ（存在する場合のみ）
+            if (config.gateway.tailscale) delete config.gateway.tailscale;
             if (config.gateway.auth.token) delete config.gateway.auth.token;
+            if (config.gateway.auth.allowTailscale) delete config.gateway.auth.allowTailscale;
         }
 
         fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));

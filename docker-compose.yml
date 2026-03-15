@@ -20,4 +20,6 @@ services:
       - ./.docker-config/gemini:/root/.gemini
       # Mount the verified and isolated user workspace to restrict AI file access
       - ${HOST_WORKSPACE_DIR:-~/openclaw-workspace}:/workspace
+      # Mount Tailscale socket for OpenClaw native Serve integration
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
     # Additional capabilities might be required depending on network features, but usually host network is enough.

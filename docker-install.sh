@@ -138,6 +138,25 @@ else
     fi
 fi
 
+# 4.5 Validate Tailscale MagicDNS (Required for Onboarding)
+if command -v tailscale >/dev/null 2>&1; then
+    echo -e "\n  ${C_BOLD}Checking Tailscale MagicDNS status...${C_RESET}"
+    while true; do
+        TS_STATUS=$(tailscale status --json 2>/dev/null || echo "{}")
+        MAGIC_DNS=$(echo "$TS_STATUS" | jq -r '.CurrentTailnet.MagicDNSEnabled // .MagicDNSEnabled' 2>/dev/null)
+        
+        if [ "$MAGIC_DNS" == "true" ]; then
+            echo -e "  ${C_GREEN}✓ MagicDNS is enabled.${C_RESET}"
+            break
+        else
+            echo -e "\n  ${C_RED}⚠ MagicDNS が有効になっていません。${C_RESET}"
+            echo -e "  モバイル連携（HTTPS）には MagicDNS が必須です。"
+            echo -e "  Tailscale 管理画面で有効にしてください: ${C_CYAN}https://login.tailscale.com/admin/dns${C_RESET}"
+            read -p "  有効化しましたか？ (Enterで再チェック, Ctrl+Cで中断): " _
+        fi
+    done
+fi
+
 
 # 5. Build and Run docker-setup.js inside a temporary container
 echo -e "\n  ${C_BOLD}Building setup and production container...${C_RESET}"
@@ -210,18 +229,18 @@ if [ $SETUP_EXIT_CODE -eq 0 ]; then
             fi
         fi
 
-        # 7. Mobile Onboarding Guide (Host side, after server is ready)
-        # Pass captured Tailscale info to the node script
+        # 7. Mobile Onboarding Guide & Auto-Pairing (Host side, after server is ready)
         export TAILSCALE_IP="$TAILSCALE_IP"
         export TAILSCALE_HOSTNAME="$TAILSCALE_HOSTNAME"
-        node -e "require('./scripts/setup/steps/06_mobile')().catch(e => console.error(e))"
+        # Run auto-pairing and mobile guide sequentially
+        node -e "require('./scripts/setup/steps/07_autopair')().then(() => require('./scripts/setup/steps/06_mobile')()).catch(e => console.error(e))"
 
         echo -e "\n  ${C_BOLD}ダッシュボード: ${C_CYAN}http://localhost:18789${C_RESET}"
         
         # Display the actual Tailscale URL if available
         TS_DISPLAY_HOST="${TAILSCALE_HOSTNAME:-$TAILSCALE_IP}"
         if [ -n "$TS_DISPLAY_HOST" ]; then
-            echo -e "  (Tailscale利用時: ${C_CYAN}http://${TS_DISPLAY_HOST}:18789${C_RESET})"
+            echo -e "  (Tailscale利用時: ${C_CYAN}https://${TS_DISPLAY_HOST}${C_RESET})"
         fi
         
         echo -e "\n  ${C_GREEN}✓ Container is now running in the background!${C_RESET}"
