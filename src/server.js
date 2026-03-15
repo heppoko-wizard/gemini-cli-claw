@@ -37,12 +37,20 @@ function isSummarizationRequest(systemPrompt, userText) {
     if (userText && userText.includes('<conversation>') && (
         userText.includes('<previous-summary>') ||
         userText.includes('## Goal') ||
-        userText.includes('structured context checkpoint summary')
+        userText.includes('structured context checkpoint summary') ||
+        userText.includes('state_snapshot')
     )) {
         return true;
     }
     // Tertiary: text_to_summarize tag (used by summarizeText)
     if (userText && userText.includes('<text_to_summarize>')) {
+        return true;
+    }
+    // Additional heuristics
+    if (systemPrompt && (
+        systemPrompt.includes('structured context checkpoint summary') ||
+        systemPrompt.includes('state_snapshot')
+    )) {
         return true;
     }
     return false;
@@ -53,6 +61,7 @@ function isSummarizationRequest(systemPrompt, userText) {
  * succeeded, while the real context is safely managed by Gemini CLI's own
  * compaction / <state_snapshot> mechanism.
  */
+/*
 function sendFakeSummaryResponse(res, requestId, stream) {
     const summary = `## Goal\nContinuing the current task as directed by the user.\n\n## Constraints & Preferences\n- (managed by the agent\'s internal memory)\n\n## Progress\n### Done\n- [x] Previous context has been preserved by the agent\'s native memory management.\n\n### In Progress\n- [ ] Awaiting next user instruction.\n\n## Key Decisions\n- Context compaction is handled internally by the agent.\n\n## Next Steps\n1. Continue with the user\'s next request.\n\n## Critical Context\n- Full conversation history is maintained by the agent\'s session.`;
 
@@ -87,6 +96,7 @@ function sendFakeSummaryResponse(res, requestId, stream) {
         }));
     }
 }
+*/
 
 // ---------------------------------------------------------------------------
 // Config
@@ -175,6 +185,46 @@ const server = http.createServer(async (req, res) => {
         }
 
         const messages = body.messages || body.input || [];
+
+        // ---------------------------------------------------------------
+        // History Cleansing (Gemini 429 Guard)
+        // ---------------------------------------------------------------
+        // Remove trailing Gemini API errors from assistant messages to 
+        // prevent error accumulation and quota exhaustion.
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.role === 'assistant' && msg.content) {
+                let contentStr = '';
+                let isArray = false;
+                if (typeof msg.content === 'string') {
+                    contentStr = msg.content;
+                } else if (Array.isArray(msg.content)) {
+                    contentStr = msg.content.map(p => p.type === 'text' ? p.text : '').join('\n');
+                    isArray = true;
+                }
+                
+                const errIdx = contentStr.indexOf('⚠️ [Gemini API Error]');
+                if (errIdx !== -1) {
+                    // Also remove the preceding newline if it exists
+                    const sliceIdx = errIdx > 0 && contentStr[errIdx - 1] === '\n' ? errIdx - 1 : errIdx;
+                    const cleanStr = contentStr.substring(0, sliceIdx);
+                    
+                    if (cleanStr.trim() === '') {
+                        // If the message is completely empty after removing the error, remove the whole message
+                        messages.splice(i, 1);
+                    } else {
+                        // Otherwise, keep the cleaned text (which may contain ZWC metadata)
+                        if (isArray) {
+                            msg.content = [{ type: 'text', text: cleanStr }];
+                        } else {
+                            msg.content = cleanStr;
+                        }
+                    }
+                    log(`[adapter] Cleansed Gemini API Error from history at index ${i}`);
+                }
+            }
+        }
+
         const stream = body.stream !== false;
         const sessionKey = body._openclawSessionKey || body._sessionId || 'default';
         const workspaceDir = body._workspaceDir || process.cwd();
@@ -231,8 +281,36 @@ const server = http.createServer(async (req, res) => {
         // Instead, we return a canned summary so OpenClaw is satisfied,
         // while Gemini CLI's memory (the SSoT) remains untouched.
         if (isSummarizationRequest(systemPrompt, promptText)) {
-            log(`[intercept] Summarization request detected — returning canned summary (SSoT protection)`);
-            sendFakeSummaryResponse(res, requestId, stream);
+            log(`[summarize] Summarization request detected — delegating to Gemini CLI (isolated session)`);
+            let sumEnv, sumSystemMdPath;
+            try {
+                ({ env: sumEnv, tempSystemMdPath: sumSystemMdPath } = prepareGeminiEnv({
+                    sessionKey: `__summarize_${requestId}`,
+                    workspaceDir,
+                    systemPrompt,
+                }));
+            } catch (e) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `Failed to prepare summarization env: ${e.message}` }));
+                return;
+            }
+
+            await runGeminiStreaming({
+                prompt: promptText,
+                messages: [],
+                model: reqModel,
+                sessionName: null,
+                mediaPaths: [],
+                env: sumEnv,
+                res,
+                requestId,
+                onSessionId: null,
+                sessionKey: `__summarize_${requestId}`,
+                skipZwcProcessing: true,
+            });
+
+            try { fs.rmSync(sumSystemMdPath); } catch (_) {}
+            log(`[summarize] Summary delegation complete.`);
             return;
         }
 

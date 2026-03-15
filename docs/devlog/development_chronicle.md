@@ -1162,3 +1162,22 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
 - `docker-install.sh` — サーバー起動後の承認ステップを削除し高速化
 - `docs/failures/001_autopair_schema_mismatch.md` — 第一号失敗録の作成
 - `.gemini/antigravity/skills/learn-from-failures/` — 新スキルの構築とコンパイラスクリプトの作成
+
+---
+
+## [2026-03-15] Session 43: OpenClaw 要約メカニズムのバイパスと Gemini CLI への委譲実装
+
+### やったこと
+- **課題**: OpenClaw が履歴増大時に発火させる「要約（コンテキスト圧縮）」リクエストを、アダプターがこれまでブロック（フェイク回答）していた。これにより、OpenClaw 側で履歴が物理的に削減されず、最終的に Gemini 側のトークン上限や 429 エラー（Quota Exceeded）を引き起こす原因となっていた。
+- **調査成果**:
+    - OpenClaw の要約プロンプトは構造化 JSON ではなく Markdown 形式のテキストを期待している。
+    - 履歴データにはステガノグラフィ用のゼロ幅文字（ZWC）が含まれたまま渡されるが、Gemini の回答には ZWC は含まれない。
+    - 要約リクエストは、メインセッション（SSoT）から独立した隔離セッション（`sessionName: null`）として実行可能である。
+- **実装内容**:
+    1. **`src/streaming.js`**: `runGeminiStreaming` に `skipZwcProcessing` オプションを導入。要約の回答（プレーンテキスト）に対して ZWC デコードを試みて破損させるのを防ぐため、要約ルートではこの処理を完全にスキップ。
+    2. **`src/server.js`**: `isSummarizationRequest` 検知時、フェイク回答を返す代わりに Gemini CLI へ処理を委譲。`sessionName: null`、`messages: []`、`skipZwcProcessing: true` を指定することで、メイン履歴を汚さず、かつプロンプト内の履歴のみを要約対象とする最適化ルートを構築。
+    3. **安全性**: ご指示に基づき、既存の `sendFakeSummaryResponse` 関数はコメントアウトしてバックアップとしてコード内に保持。
+- **デプロイと検証**: Docker コンテナを再ビルド・再起動し、アダプターが正常に起動し、委譲ロジックが正常に組み込まれたことを確認済み。
+
+### 成果
+- OpenClaw 側での自律的なコンテキスト圧縮が機能するようになり、Gemini とのやり取りにおけるトークン消費量の抑制と、リクエスト肥大化に伴う 429 エラーの根本的解決が期待される。

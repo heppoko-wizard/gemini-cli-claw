@@ -118,7 +118,7 @@ const { runnerPool } = require('./runner-pool.js');
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks via RunnerPool.
  */
-async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
+async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey, skipZwcProcessing = false }) {
     const responseId = `resp_${requestId}`;
     const perfStart = Date.now();
     let perfFirstToken = null;
@@ -144,7 +144,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         // 履歴をGemini CLIの内部SessionData形式に合成する (SSoT 3.0)
         let resumedSessionData = undefined;
-        if (messages && messages.length > 0) {
+        if (!skipZwcProcessing && messages && messages.length > 0) {
             const geminiMessages = [];
             const timestamp = new Date().toISOString();
 
