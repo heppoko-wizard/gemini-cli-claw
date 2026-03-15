@@ -57,14 +57,20 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
     if (!realGeminiHome) {
         throw new Error("CRITICAL: GEMINI_CLI_HOME environment variable is not defined. Please check your .env or docker-compose.yml.");
     }
+    // コンテナ内の二重構造（/root/.gemini/.gemini）を避け、
+    // GEMINI_CLI_HOME 直下（通常は /root/.gemini/）から直接ファイルをコピーする。
+    // ※ docker-compose.yml のマウント設定により、/root/.gemini/ が実体。
+    const srcBase = path.join(realGeminiHome, '.gemini');
+    const finalSrcBase = fs.existsSync(srcBase) ? srcBase : realGeminiHome;
+
     for (const file of ['oauth_creds.json', 'google_accounts.json', 'installation_id']) {
-        const src = path.join(realGeminiHome, '.gemini', file);
+        const src = path.join(finalSrcBase, file);
         if (!fs.existsSync(src)) continue;
         try { fs.copyFileSync(src, path.join(isolatedGeminiDir, file)); } catch (_) { }
     }
 
     // スキルディレクトリのコピー (再帰的)
-    const srcSkills = path.join(realGeminiHome, '.gemini', 'skills');
+    const srcSkills = path.join(finalSrcBase, 'skills');
     const destSkills = path.join(isolatedGeminiDir, 'skills');
     if (fs.existsSync(srcSkills)) {
         try {
@@ -76,7 +82,7 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
     }
 
     // 1. 本環境の settings.json をベースに読み込み、openclaw-tools MCP を注入
-    const realSettingsPath = path.join(realGeminiHome, '.gemini', 'settings.json');
+    const realSettingsPath = path.join(finalSrcBase, 'settings.json');
     const isolatedSettingsPath = path.join(isolatedGeminiDir, 'settings.json');
     let userSettings = { mcpServers: {} };
     try {
