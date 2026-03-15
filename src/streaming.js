@@ -313,10 +313,10 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                     // 抽出が終わったら、ゴミテキストを完全に消去する。
                     // 壊れた ZWC の残骸も含め、全てのゼロ幅文字(\u200B-\u200D)を物理的に除去する。
                     let cleanText = text.replace(/[\u200B\u200C\u200D]/g, '');
-                    // SSoT 4.2: アダプターが付与した表示行（中黒/タブ付き）を完全削除
-                    // 3. アダプターの表示行 (⚙️ Using tool..., ✅ Tool finished...) を削除 (中黒/全角スペース付き、ID付きも含む)
-                    cleanText = cleanText.replace(/\n*·?[ \t　]*⚙️ Using tool \[.*\] \[id:.*\] \.\.\.\n*/g, '');
-                    cleanText = cleanText.replace(/\n?[ \t]*·?[ \t]*[✅❌] Tool (finished|failed)[^\n]*/g, '');
+                    // SSoT 4.2: アダプターが付与した表示行（全角スペース付き）を完全削除
+                    // 行頭の改行や、インデントとして使用している全角スペースを含めてマッチさせる
+                    cleanText = cleanText.replace(/\n*[ \t　]*⚙️ Using tool \[[^\]]*\](?:\s*\[id:[^\]]*\])? \.\.\.\n*/g, '');
+                    cleanText = cleanText.replace(/\n?[ \t　]*[✅❌] Tool (finished|failed)[^\n]*/g, '');
                     cleanText = cleanText.trim();
 
                     // Gemini用メッセージオブジェクトの構築
@@ -482,7 +482,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             model: 'gemini',
                             choices: [{
                                 index: 0,
-                                delta: { content: `\n\n　　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
+                                delta: { content: `\n　　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
                                 finish_reason: null
                             }]
                         });
