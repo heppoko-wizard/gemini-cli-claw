@@ -5,6 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "setup": "node interactive-setup.js",
+    "rebuild": "node rebuild.js",
+    "restart": "node restart.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
