@@ -69,6 +69,27 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
         try { fs.copyFileSync(src, path.join(isolatedGeminiDir, file)); } catch (_) { }
     }
 
+    // gogcli の認証情報のコピー (SSoT 4.0 安定化)
+    // 隔離環境でも gogcli がトークンを認識できるよう、.config/gogcli を同期する。
+    const srcGogConfig = path.join(os.homedir(), '.config', 'gogcli');
+    const destGogConfig = path.join(isolatedHomeDir, '.config', 'gogcli');
+    console.log(`[Pool] Syncing gogcli config: ${srcGogConfig} -> ${destGogConfig}`);
+    if (fs.existsSync(srcGogConfig)) {
+        try {
+            fs.mkdirSync(destGogConfig, { recursive: true });
+            fs.cpSync(srcGogConfig, destGogConfig, { recursive: true, force: true });
+            console.log(`[Pool] Copied gogcli config. Files in dest: ${fs.readdirSync(destGogConfig).join(', ')}`);
+            const keyringDir = path.join(destGogConfig, 'keyring');
+            if (fs.existsSync(keyringDir)) {
+                console.log(`[Pool] Tokens in dest keyring: ${fs.readdirSync(keyringDir).join(', ')}`);
+            }
+        } catch (e) {
+            console.warn(`[Pool] Failed to copy gogcli config: ${e.message}`);
+        }
+    } else {
+        console.warn(`[Pool] Source gogcli config not found: ${srcGogConfig}`);
+    }
+
     // スキルディレクトリのコピー (再帰的)
     const srcSkills = path.join(finalSrcBase, 'skills');
     const destSkills = path.join(isolatedGeminiDir, 'skills');

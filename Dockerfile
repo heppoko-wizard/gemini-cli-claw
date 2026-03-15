@@ -41,6 +41,9 @@ ENV PATH="/root/.npm-global/bin:${PATH}"
 # 【最重関門】ネイティブビルドを伴う最新版 OpenClaw (v2026.3.13) のグローバルインストール
 RUN npm install -g openclaw@2026.3.13
 
+# /app/node_modules/.bin を PATH に追加し、gemini コマンドをどこでも叩けるようにする
+ENV PATH="/app/node_modules/.bin:${PATH}"
+
 WORKDIR /app
 
 # アダプタパッケージ情報とソースの転送
