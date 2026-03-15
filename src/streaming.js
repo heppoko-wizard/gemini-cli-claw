@@ -473,7 +473,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         }
 
                         // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
-                        // 全角スペース (　) を使用することでレンダラーによるトリミングを回避し、確実にインデントさせる
+                        // 全角スペース (　) のみでインデントを構成。記号なしでもレンダラーによるトリミングを回避可能。
                         lastWasTool = true;
                         sseWrite(res, {
                             id: responseId,
@@ -482,7 +482,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             model: 'gemini',
                             choices: [{
                                 index: 0,
-                                delta: { content: `\n\n·　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
+                                delta: { content: `\n\n　　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
                                 finish_reason: null
                             }]
                         });
@@ -520,7 +520,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         }
 
                         // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
-                        // 全角スペースインデント。空白行削除のため末尾改行なし。
+                        // 全角スペースのみのインデント。
                         lastWasTool = true;
                         sseWrite(res, {
                             id: responseId,
@@ -529,7 +529,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                             model: 'gemini',
                             choices: [{
                                 index: 0,
-                                delta: { content: `\n·　　${toolMsg} [res:${json.tool_id}]` },
+                                delta: { content: `\n　　　${toolMsg} [res:${json.tool_id}]` },
                                 finish_reason: null
                             }]
                         });
