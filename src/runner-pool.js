@@ -63,6 +63,18 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
         try { fs.copyFileSync(src, path.join(isolatedGeminiDir, file)); } catch (_) { }
     }
 
+    // スキルディレクトリのコピー (再帰的)
+    const srcSkills = path.join(realGeminiHome, '.gemini', 'skills');
+    const destSkills = path.join(isolatedGeminiDir, 'skills');
+    if (fs.existsSync(srcSkills)) {
+        try {
+            // Node 16.7.0+ の cpSync を使用。存在しない場合は作成、既存の場合は上書き
+            fs.cpSync(srcSkills, destSkills, { recursive: true, force: true });
+        } catch (e) {
+            console.warn(`[Pool] Failed to copy skills directory: ${e.message}`);
+        }
+    }
+
     // 1. 本環境の settings.json をベースに読み込み、openclaw-tools MCP を注入
     const realSettingsPath = path.join(realGeminiHome, '.gemini', 'settings.json');
     const isolatedSettingsPath = path.join(isolatedGeminiDir, 'settings.json');
@@ -83,6 +95,12 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
         args: ['-c', `node "${path.join(baseDir, 'mcp-server.mjs')}" "pool-shared" "${workspaceCwd}" 2>> "${mcpLogPath}"`],
         trust: true
     };
+
+    // 2. スキル有効化の注入 (SSoT 4.0)
+    // ソースコード調査の結果、settings.json に skills.path は存在せず、
+    // GEMINI_CLI_HOME/skills(/root/.gemini/skills) が自動検出されるためフラグのみ設定。
+    userSettings.skills = userSettings.skills || {};
+    userSettings.skills.enabled = true;
 
     // 信頼フォルダの登録: config.js L426-428 では trustedFolder=false の場合に
     // --approval-mode=yolo が強制的に DEFAULT に落とされ run_shell_command が無効化される。

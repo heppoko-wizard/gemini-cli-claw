@@ -11,13 +11,16 @@ services:
     environment:
       - NODE_ENV=production
       - GEMINI_ADAPTER_PORT=3972
-      - GEMINI_CLI_HOME=/root/.gemini
+      - GEMINI_CLI_HOME=/root
       # Path mapping inside the container for the separated workspace
       - AI_WORKSPACE_DIR=/workspace
+      - GOG_KEYRING_PASSWORD=openclaw-adapter
+      - GOG_KEYRING_BACKEND=file
     volumes:
       # Mount the unified configuration directory from the host to the container's expected paths
       - ./.docker-config/openclaw:/root/.openclaw
       - ./.docker-config/gemini:/root/.gemini
+      - ./.docker-config/gogcli:/root/.config/gogcli
       # Mount the verified and isolated user workspace to restrict AI file access
       - ${HOST_WORKSPACE_DIR:-~/openclaw-workspace}:/workspace
       # Mount Tailscale socket for OpenClaw native Serve integration

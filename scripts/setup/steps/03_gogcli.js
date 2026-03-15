@@ -53,19 +53,16 @@ module.exports = async function runStep() {
         throw new Error('gogcli が見つかりません。Dockerfileのビルドステップを確認してください。');
     }
 
-    // Auth
+    // --- 🔐 OAuth Credentials Setup (Strict Mode) ---
     fs.mkdirSync(GOG_CONFIG_DIR, { recursive: true });
 
-    const proxyClientSecret = {
-        installed: {
-            client_id: String.fromCharCode(55, 52, 57, 55, 53, 55, 55, 55, 50, 51, 55, 55, 45, 97, 53, 97, 55, 107, 115, 52, 111, 118, 103, 99, 114, 109, 52, 114, 102, 116, 100, 115, 54, 118, 98, 55, 52, 49, 57, 97, 109, 99, 51, 108, 98, 46, 97, 112, 112, 115, 46, 103, 111, 111, 103, 108, 101, 117, 115, 101, 114, 99, 111, 110, 116, 101, 110, 116, 46, 99, 111, 109),
-            auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-            token_uri: 'https://oauth2.googleapis.com/token',
-            client_secret: String.fromCharCode(71, 79, 67, 83, 80, 88, 45, 117, 115, 100, 54, 68, 54, 50, 104, 51, 103, 75, 104, 95, 80, 122, 100, 115, 77, 82, 102, 95, 104, 57, 51, 101, 106, 71, 99),
-            redirect_uris: ['http://localhost']
-        }
-    };
-    fs.writeFileSync(GOG_CREDS_FILE, JSON.stringify(proxyClientSecret, null, 2));
+    const hostCredsFile = path.join(PROJECT_ROOT, 'credentials.json');
+    if (!fs.existsSync(hostCredsFile)) {
+        throw new Error(`CRITICAL: Google Workspace 認証用の鍵ファイルが見つかりません: ${hostCredsFile}\nGoogle Cloud Console から OAuth クライアント ID (JSON) をダウンロードして配置してください。`);
+    }
+
+    logInfo(`  利用可能な鍵ファイルを確認しました: ${hostCredsFile}`);
+    fs.copyFileSync(hostCredsFile, GOG_CREDS_FILE);
 
     // Register credentials
     spawnSync('gog', ['auth', 'credentials', GOG_CREDS_FILE], { env: getGogEnv() });

@@ -1181,3 +1181,37 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
 
 ### 成果
 - OpenClaw 側での自律的なコンテキスト圧縮が機能するようになり、Gemini とのやり取りにおけるトークン消費量の抑制と、リクエスト肥大化に伴う 429 エラーの根本的解決が期待される。
+
+---
+# 2026-03-15 開発ログ
+
+## セッション 33: SSoT 4.0 安定化 — 隔離環境の完全同期と認証の永続化
+
+### やったこと
+- **スキル認識メカニズムの特定**: Gemini CLI (`SkillManager`) のソースコードを直接調査し、`settings.json` に `skills.path` は存在せず、`GEMINI_CLI_HOME/skills` が固定の検索パスであることを確定。
+- **隔離環境の完全同期**: `runner-pool.js` を修正し、隔離ディレクトリへの `skills.enabled` 設定注入と、物理的なスキルフォルダのコピー処理を実装。
+- **認証の Docker 永続化**: `gogcli` のトークンストア（`keyring`）をホストの `.docker-config/gogcli` にマウントし、コンテナ再起動後も認証が維持されるように修正。
+- **パスの正規化**: `GEMINI_CLI_HOME` を `/root/.gemini` (実体) から `/root` (親) へ変更し、Gemini CLI の標準的なパス解決ロジックに適合させた。
+
+### 発見・学んだこと
+- **真実の外在性**: ソフトウェアの設定パラメーターを「類推」で提案したことで、実在しない `skills.path` を注入しようとする重大なミス（F-003）を犯した。調査ログ `026_isolated_skill_loading_mechanism.md` に解決策と「真実」を記録。
+- **Node.js のパス解決と環境変数**: `GEMINI_CLI_HOME` に指定したパスの直下に `.gemini` が作られる仕様は、構成管理上、極めて注意深く扱う必要がある。
+
+### ハマったこと・失敗
+- **現象**: ログイン成功後、コンテナから「No tokens stored」と報告され、認証が維持されない。
+- **原因**: マウント先の権限不一致、および `GOG_KEYRING_BACKEND` 設定の不備により、トークンが一時ディレクトリにしか保存されていなかった。
+- **対処**: `docker-compose.yml` と `gws.js` の両方で `GOG_KEYRING_PASSWORD` と `file` バックエンドを徹底的に一致させ、永続化に成功。
+
+### 重大な失敗の教訓集積 (F-003)
+- **【抽象レベル】パラメーターの推測を禁ずる**: 「おそらくこうだろう」という推測は、プロジェクトを破壊しユーザーの信頼を損なう。設定変更の際は、必ずソースコードやスキーマ定義などのエビデンス（真実）を確認してから計画を立てること。
+
+### 変更したファイル
+- `src/runner-pool.js` — スキル有効化フラグの注入とディレクトリの物理同期を実装。
+- `docker-compose.yml` — `GEMINI_CLI_HOME` のパス修正と認証環境変数の固定。
+- `gws.js` — 非対話認証の安定化とログインフローの改善。
+- `docs/failures/003_speculative_parameter_injection.md` — 新規失敗記録。
+- `docs/investigation/026_isolated_skill_loading_mechanism.md` — 新規調査ログ。
+- `docs/devlog/development_chronicle.md` — 本ログの追記。
+
+### 成果
+- SSoT 4.0 基盤が完成し、隔離環境におけるスキル認識と `gogcli` による Google Workspace 実データアクセス（Calendar 取得等）を完全に検証した。
