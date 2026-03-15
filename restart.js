@@ -32,7 +32,7 @@ async function isServerReady() {
 async function main() {
     console.log('🔄 Quick Restarting OpenClaw Gemini CLI Adapter (no build)...');
 
-    const child = spawn('docker', ['compose', 'up', '-d'], {
+    const child = spawn('docker', ['compose', 'restart'], {
         stdio: 'inherit',
         shell: true
     });
