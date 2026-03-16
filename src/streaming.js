@@ -234,10 +234,10 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                                     }
                                 }] : undefined,
                             });
-                            cleanText = cleanText.replace(fullMatch, '');
                         } else {
                             log(`[history] WARN: No stored data for tool marker: ${markerName} [${markerCallId}]`);
                         }
+                        cleanText = cleanText.replace(fullMatch, '');
                     }
 
                     geminiMessages.push({
