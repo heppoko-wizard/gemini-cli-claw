@@ -1,3 +1,5 @@
+import path from 'path';
+import fs from 'fs';
 import { loadSettings } from '../node_modules/@google/gemini-cli/dist/src/config/settings.js';
 import { loadCliConfig, parseArguments } from '../node_modules/@google/gemini-cli/dist/src/config/config.js';
 import { validateNonInteractiveAuth } from '../node_modules/@google/gemini-cli/dist/src/validateNonInterActiveAuth.js';
@@ -15,6 +17,21 @@ async function main() {
     });
     await config.storage.initialize();
     await config.initialize();
+
+    // SSoT 5.2: 隔離環境内のスキルディレクトリを WorkspaceContext の許可リストに追加
+    // これにより read_file 等のツールでスキルドキュメントを自律的に参照可能にする
+    const isolatedGeminiDir = process.env.GEMINI_CLI_HOME ? path.join(process.env.GEMINI_CLI_HOME, '.gemini') : null;
+    if (isolatedGeminiDir) {
+        const skillsDir = path.join(isolatedGeminiDir, 'skills');
+        if (fs.existsSync(skillsDir)) {
+            try {
+                config.getWorkspaceContext().addReadOnlyPath(skillsDir);
+                console.log(`[Runner] Added skills directory to read-only workspace: ${skillsDir}`);
+            } catch (e) {
+                console.warn(`[Runner] Failed to add skills path to workspace: ${e.message}`);
+            }
+        }
+    }
 
     // 2. 認証のロード (非対話用)
     const authType = await validateNonInteractiveAuth(
@@ -38,7 +55,34 @@ async function main() {
     process.on('message', async (message) => {
         if (message.type === 'run') {
             const { input, prompt_id, resumedSessionData, model, mediaPaths } = message;
-            
+
+            // --- SSoT 5.0: 全イベント傍受＋IPC送信 ---
+            if (config && config.getGeminiClient) {
+                const geminiClient = config.getGeminiClient();
+                const originalSendMessageStream = geminiClient.sendMessageStream.bind(geminiClient);
+                
+                geminiClient.sendMessageStream = async function* (...args) {
+                    const gen = originalSendMessageStream(...args);
+                    for await (const event of gen) {
+                        if (process.send) {
+                            try {
+                                process.send({
+                                    type: 'gemini_event',
+                                    event: {
+                                        type: event.type,
+                                        value: event.value,
+                                        traceId: event.traceId,
+                                        reason: event.reason,
+                                    }
+                                });
+                            } catch (e) {
+                                console.error('[Runner] IPC send failed:', e.message);
+                            }
+                        }
+                        yield event;
+                    }
+                };
+            }
             try {
                 if (resumedSessionData && resumedSessionData.conversation) {
                     config.setSessionId(resumedSessionData.conversation.sessionId);

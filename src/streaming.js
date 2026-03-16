@@ -6,33 +6,74 @@ const path = require('path');
 const { log, randomId, sseWrite } = require('./utils');
 
 // ---------------------------------------------------------------------------
-// Zero-Width Character Steganography (SSoT 3.1)
+// SSoT 6.0: ツールコンテキストストア
+// tool_call_request/tool_result の実データをアダプター側で保持する。
+// OpenClaw には軽量マーカー（⚙️ tooluse[name][callId]）のみを送出する。
+// 次ターンの履歴受信時に callId を使ってリハイドレートし、
+// Gemini CLI 向けの正規 toolCalls 構造に復元する。
 // ---------------------------------------------------------------------------
-const ZWC_START = '\u200B\u200C\u200B\u200C\u200B\u200D';
-const ZWC_END = '\u200C\u200B\u200C\u200B\u200C';
 
-function encodeZwc(text) {
-    const encoded = Array.from(Buffer.from(text, 'utf8')).map(byte => {
-        return byte.toString(2).padStart(8, '0').split('').map(bit => bit === '1' ? '\u200B' : '\u200C').join('');
-    }).join('\u200D');
-    return ZWC_START + encoded + ZWC_END;
+// セッションキー → callId → { name, args, result } のネストした Map
+const toolMemoryStore = new Map();
+const CONTEXT_BASE_DIR = '/app/logs/contexts';
+
+function getSessionStore(sessionKey) {
+    if (!toolMemoryStore.has(sessionKey)) {
+        toolMemoryStore.set(sessionKey, new Map());
+        // セッションごとのディレクトリ作成
+        const sessionDir = path.join(CONTEXT_BASE_DIR, sessionKey);
+        if (!fs.existsSync(sessionDir)) {
+            fs.mkdirSync(sessionDir, { recursive: true });
+        }
+    }
+    return toolMemoryStore.get(sessionKey);
 }
 
-function decodeZwc(zwcStr) {
+/**
+ * ツール情報をメモリとファイルの両方に保存する
+ */
+function storeToolContext(sessionKey, callId, data) {
+    const sessionStore = getSessionStore(sessionKey);
+    const existing = sessionStore.get(callId) || {};
+    const updated = { ...existing, ...data };
+    
+    // メモリに保存
+    sessionStore.set(callId, updated);
+    
+    // ファイルに保存
     try {
-        let coreStr = zwcStr.replace(ZWC_START, '').replace(ZWC_END, '');
-        // 強制改行やマークダウンのワードラップによるノイズ(改行、スペース等)を完全に除去する
-        coreStr = coreStr.replace(/[^\u200B\u200C\u200D]/g, '');
-        
-        const bytes = coreStr.split('\u200D').map(zwcByte => {
-            const bits = zwcByte.split('').map(char => char === '\u200B' ? '1' : '0').join('');
-            return parseInt(bits, 2);
-        });
-        return Buffer.from(bytes).toString('utf8');
+        const filePath = path.join(CONTEXT_BASE_DIR, sessionKey, `${callId}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8');
+        log(`[tool-store] Persisted context: ${sessionKey}/${callId}.json`);
     } catch (e) {
-        return null;
+        log(`[tool-store] ERROR persisting context: ${e.message}`);
     }
 }
+
+/**
+ * ツール情報をメモリから取得し、なければファイルからロードする
+ */
+function loadToolContext(sessionKey, callId) {
+    const sessionStore = getSessionStore(sessionKey);
+    if (sessionStore.has(callId)) {
+        return sessionStore.get(callId);
+    }
+    
+    // ファイルからロードを試みる
+    try {
+        const filePath = path.join(CONTEXT_BASE_DIR, sessionKey, `${callId}.json`);
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+            sessionStore.set(callId, data);
+            log(`[tool-store] Loaded context from file: ${sessionKey}/${callId}.json`);
+            return data;
+        }
+    } catch (e) {
+        log(`[tool-store] ERROR loading context from file: ${e.message}`);
+    }
+    return null;
+}
+
 
 // ---------------------------------------------------------------------------
 // Gemini CLI discovery
@@ -118,7 +159,7 @@ const { runnerPool } = require('./runner-pool.js');
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks via RunnerPool.
  */
-async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey, skipZwcProcessing = false }) {
+async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
     const responseId = `resp_${requestId}`;
     const perfStart = Date.now();
     let perfFirstToken = null;
@@ -144,9 +185,13 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         // 履歴をGemini CLIの内部SessionData形式に合成する (SSoT 3.0)
         let resumedSessionData = undefined;
-        if (!skipZwcProcessing && messages && messages.length > 0) {
+        if (messages && messages.length > 0) {
             const geminiMessages = [];
             const timestamp = new Date().toISOString();
+
+            // SSoT 6.0: ツールマーカー検出正規表現
+            const TOOL_MARKER_RE = /\n?⚙️ tooluse\[([^\]]+)\]\[([^\]]+)\]\n?/g;
+            const sessionStore = getSessionStore(sessionKey);
 
             for (const msg of messages) {
                 let text = '';
@@ -162,186 +207,59 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         content: [{ text: text }]
                     });
                 } else if (msg.role === 'assistant') {
-                    // --- SSoT 3.1: ゼロ幅文字メタデータの抽出と再構築 (SSoT 4.0 堅牢化版) ---
-                    const toolCalls = [];
-                    const timestamp = new Date().toISOString();
-
-                    // 壊れた ZWC (切り詰められたものなど) も逃さず捕捉するために、
-                    // 開始コードを基準にテキストをスキャンする
-                    let searchIdx = 0;
-                    while (true) {
-                        const startIdx = text.indexOf(ZWC_START, searchIdx);
-                        if (startIdx === -1) break;
-
-                        const afterStart = text.substring(startIdx + ZWC_START.length);
-                        const endIdxRelative = afterStart.indexOf(ZWC_END);
-                        
-                        let zwcBlock;
-                        let isTruncated = false;
-
-                        if (endIdxRelative !== -1) {
-                            // 正常な終了コードが見つかった
-                            zwcBlock = text.substring(startIdx, startIdx + ZWC_START.length + endIdxRelative + ZWC_END.length);
-                            searchIdx = startIdx + zwcBlock.length;
+                    // SSoT 6.0: テキスト内の ⚙️ tooluse マーカーを検出してリハイドレート
+                    const toolCallsFromMarkers = [];
+                    let cleanText = text;
+                    let match;
+                    TOOL_MARKER_RE.lastIndex = 0;
+                    while ((match = TOOL_MARKER_RE.exec(text)) !== null) {
+                        const [fullMatch, markerName, markerCallId] = match;
+                        const stored = loadToolContext(sessionKey, markerCallId);
+                        if (stored) {
+                            log(`[history] Rehydrating tool: ${markerName} [${markerCallId}]`);
+                            toolCallsFromMarkers.push({
+                                id: markerCallId,
+                                name: stored.name,
+                                args: stored.args,
+                                status: 'success',
+                                timestamp: new Date().toISOString(),
+                                result: stored.result ? [{
+                                    functionResponse: {
+                                        name: stored.name,
+                                        response: { output:
+                                            typeof stored.result === 'string'
+                                                ? stored.result
+                                                : JSON.stringify(stored.result)
+                                        }
+                                    }
+                                }] : undefined,
+                            });
+                            cleanText = cleanText.replace(fullMatch, '');
                         } else {
-                            // 終了コードが見つからない（途中で切り詰められた）
-                            // 次の開始コードが現れるか、テキストの末尾までを一つのブロックとして扱う
-                            const nextStartRelative = afterStart.indexOf(ZWC_START);
-                            const captureLen = nextStartRelative !== -1 ? nextStartRelative : afterStart.length;
-                            zwcBlock = text.substring(startIdx, startIdx + ZWC_START.length + captureLen);
-                            isTruncated = true;
-                            searchIdx = startIdx + zwcBlock.length;
-                        }
-
-                        try {
-                            const decodedJson = decodeZwc(zwcBlock);
-                            if (!decodedJson) throw new Error("Failed to decode ZWC string");
-                            const meta = JSON.parse(decodedJson);
-
-                            if (meta.type === 'tool_use_pointer' || meta.type === 'tool_use') {
-                                // SSoT 4.0: ローカルファイルから tool_use の実データをリハイドレート
-                                let actualUse = meta;
-                                if (meta.type === 'tool_use_pointer') {
-                                    const contextPath = path.join(__dir, 'logs', 'contexts', meta.sessionKey || sessionKey || 'default', `tool_use_${meta.tool_id}.json`);
-                                    try {
-                                        if (fs.existsSync(contextPath)) {
-                                            actualUse = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
-                                        } else {
-                                            log(`[adapter] ⚠️ Context file not found for tool_use ${meta.tool_id}, using pointer data.`);
-                                        }
-                                    } catch (e) {
-                                        log(`[adapter] ⚠️ Failed to rehydrate context for tool_use ${meta.tool_id}: ${e.message}`);
-                                    }
-                                }
-
-                                toolCalls.push({
-                                    id: actualUse.tool_id,
-                                    name: actualUse.tool_name,
-                                    args: actualUse.parameters || {},
-                                    status: 'success',
-                                    timestamp: timestamp
-                                });
-                            } else if (meta.type === 'tool_result_pointer' || meta.type === 'tool_result') {
-                                // SSoT 4.0: ローカルファイルから実データをリハイドレート
-                                let actualResult = meta;
-                                if (meta.type === 'tool_result_pointer') {
-                                    const contextPath = path.join(__dir, 'logs', 'contexts', meta.sessionKey || sessionKey || 'default', `tool_${meta.tool_id}.json`);
-                                    try {
-                                        if (fs.existsSync(contextPath)) {
-                                            actualResult = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
-                                        } else {
-                                            log(`[adapter] ⚠️ Context file not found for ${meta.tool_id}, using pointer data.`);
-                                        }
-                                    } catch (e) {
-                                        log(`[adapter] ⚠️ Failed to rehydrate context for ${meta.tool_id}: ${e.message}`);
-                                    }
-                                }
-
-                                const targetCall = toolCalls.find(tc => tc.id === actualResult.tool_id);
-                                if (targetCall) {
-                                    targetCall.result = [{
-                                        functionResponse: {
-                                            name: targetCall.name,
-                                            response: {
-                                                output: actualResult.output || (actualResult.error ? JSON.stringify(actualResult.error) : 'success')
-                                            }
-                                        }
-                                    }];
-                                }
-                            }
-                        } catch (e) {
-                            // 壊れたメタデータを「完全転写」して専用ログに記録
-                            const errLogPath = path.join(__dir, 'logs', 'zwc_errors.log');
-                            let transcript = `[${new Date().toISOString()}] ${isTruncated ? 'TRUNCATED' : 'INVALID'} ZWC ERROR: ${e.message}\n`;
-                            const decodedAttempt = decodeZwc(zwcBlock) || "(decode failed)";
-                            transcript += `Decoded Attempt: ${decodedAttempt}\n`;
-                            transcript += `Raw ZWC Data (Length ${zwcBlock.length}): ${zwcBlock}\n\n`;
-                            
-                            try { fs.appendFileSync(errLogPath, transcript); } catch (_) {}
-                            log(`[adapter] ⚠️ Captured and transcribed broken ZWC to logs/zwc_errors.log`);
+                            log(`[history] WARN: No stored data for tool marker: ${markerName} [${markerCallId}]`);
                         }
                     }
 
-                    // --- SSoT 4.2: プレーンテキスト・ポインタのスキャン (ZWC 廃止後の新形式) ---
-                    // [id:xxx] => tool_use, [res:xxx] => tool_result として処理する
-                    const idPattern = /\[id:([^\]]+)\]/g;
-                    const resPattern = /\[res:([^\]]+)\]/g;
-                    let ptMatch;
-                    while ((ptMatch = idPattern.exec(text)) !== null) {
-                        const toolId = ptMatch[1];
-                        if (!toolCalls.find(tc => tc.id === toolId)) {
-                            const contextPath = path.join(__dir, 'logs', 'contexts', sessionKey || 'default', `tool_use_${toolId}.json`);
-                            try {
-                                if (fs.existsSync(contextPath)) {
-                                    const actualUse = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
-                                    toolCalls.push({
-                                        id: actualUse.tool_id,
-                                        name: actualUse.tool_name,
-                                        args: actualUse.parameters || {},
-                                        status: 'success',
-                                        timestamp: timestamp
-                                    });
-                                }
-                            } catch (e) {
-                                log(`[adapter] ⚠️ [SSoT 4.2] Failed to rehydrate tool_use ${toolId}: ${e.message}`);
-                            }
-                        }
-                    }
-                    while ((ptMatch = resPattern.exec(text)) !== null) {
-                        const toolId = ptMatch[1];
-                        const contextPath = path.join(__dir, 'logs', 'contexts', sessionKey || 'default', `tool_${toolId}.json`);
-                        try {
-                            if (fs.existsSync(contextPath)) {
-                                const actualResult = JSON.parse(fs.readFileSync(contextPath, 'utf-8'));
-                                const targetCall = toolCalls.find(tc => tc.id === toolId);
-                                if (targetCall && !targetCall.result) {
-                                    targetCall.result = [{
-                                        functionResponse: {
-                                            name: targetCall.name,
-                                            response: {
-                                                output: actualResult.output || (actualResult.error ? JSON.stringify(actualResult.error) : 'success')
-                                            }
-                                        }
-                                    }];
-                                }
-                            }
-                        } catch (e) {
-                            log(`[adapter] ⚠️ [SSoT 4.2] Failed to rehydrate tool_result ${toolId}: ${e.message}`);
-                        }
-                    }
-
-                    // 抽出が終わったら、ゴミテキストを完全に消去する。
-                    // 壊れた ZWC の残骸も含め、全てのゼロ幅文字(\u200B-\u200D)を物理的に除去する。
-                    let cleanText = text.replace(/[\u200B\u200C\u200D]/g, '');
-                    // SSoT 4.2: アダプターが付与した表示行（全角スペース付き）を完全削除
-                    // 行頭の改行や、インデントとして使用している全角スペースを含めてマッチさせる
-                    cleanText = cleanText.replace(/\n*[ \t　]*⚙️ Using tool \[[^\]]*\](?:\s*\[id:[^\]]*\])? \.\.\.\n*/g, '');
-                    cleanText = cleanText.replace(/\n?[ \t　]*[✅❌] Tool (finished|failed)[^\n]*/g, '');
-                    cleanText = cleanText.trim();
-
-                    // Gemini用メッセージオブジェクトの構築
-                    const geminiMsg = {
+                    geminiMessages.push({
                         type: 'gemini',
-                        content: [{ text: cleanText }]
-                    };
-
-                    // 復元した toolCalls があればアタッチする
-                    if (toolCalls.length > 0) {
-                        geminiMsg.toolCalls = toolCalls;
-
-                        // 万が一クリーンなアシスタントのテキストが空になってしまった場合は、
-                        // スキーマバリデーションエラーを防ぐために空文字をセットするか、
-                        // もしくは純粋なツール実行のみのターンとして振る舞う
-                        if (!cleanText) {
-                            geminiMsg.content = [{ text: '' }];
+                        content: [{ text: cleanText.trim() }],
+                        ...(toolCallsFromMarkers.length > 0 ? { toolCalls: toolCallsFromMarkers } : {})
+                    });
+                } else if (msg.role === 'tool') {
+                    const resultToolCallId = msg.tool_call_id || '';
+                    const result = typeof msg.content === 'string' ? msg.content : '';
+                    const lastGemini = [...geminiMessages].reverse().find(m => m.type === 'gemini');
+                    if (lastGemini && lastGemini.toolCalls) {
+                        const matchingCall = lastGemini.toolCalls.find(tc => tc.id === resultToolCallId);
+                        if (matchingCall) {
+                            matchingCall.result = [{
+                                functionResponse: {
+                                    name: matchingCall.name,
+                                    response: { output: result }
+                                }
+                            }];
                         }
                     }
-
-                    geminiMessages.push(geminiMsg);
-                } else if (msg.role === 'tool' || msg.role === 'toolResult') {
-                    // OpenClaw自身がツールを実行して結果を返してきた場合 (旧仕様用・念のため残す)
-                    // (SSoT3.0では基本的にここは通らない)
-                    continue; // SSoT3.0ではインラインで処理済みのためスキップ
                 }
             }
 
@@ -384,173 +302,173 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
         let fullText = '';
         let lastWasTool = false; // SSoT 4.2: ツールと地の文の間に改行を入れるための状態管理
 
-        // 2. 標準出力をパースし、SSEでストリーミング
+        // --- SSoT 5.0: IPC によるイベント受信 ---
+        
+        runner.on('message', (msg) => {
+            if (msg.type !== 'gemini_event') return;
+            const event = msg.event;
+            
+            switch (event.type) {
+                case 'content': {
+                    if (!event.value) break;
+                    if (!perfFirstToken) {
+                        perfFirstToken = Date.now();
+                        log(`[perf] Time To First Token: ${((perfFirstToken - perfStart) / 1000).toFixed(2)}s`);
+                    }
+                    fullText += event.value;
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: event.value },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+                
+                case 'thought': {
+                    // SSoT 6.0: 思考プロセスを reasoning_content として送出（装飾なし）
+                    if (!event.value) break;
+                    const thoughtText = event.value.description || event.value.subject || '';
+                    if (!thoughtText) break;
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { reasoning_content: thoughtText },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+                
+                case 'tool_call_request': {
+                    // SSoT 6.0: ツールマーカー ID 方式
+                    // (a) 実データをアダプター側メモリに保存
+                    // (b) OpenClaw に ⚙️ tooluse[name][callId] マーカーを content として送出
+                    // ※ tool_calls フィールドは一切送出しない（インターセプト完全回避）
+                    if (!event.value) break;
+                    const tc = event.value;
+                    const tcCallId = tc.callId || tc.id || randomId();
+                    const tcName = tc.name || 'unknown';
+                    
+                    // セッション単位でツールデータを保存
+                    const sessionStore = getSessionStore(sessionKey);
+                    sessionStore.set(tcCallId, { name: tcName, args: tc.args || {}, result: null });
+                    log(`[tool-store] Stored tool_call_request: ${tcName} [${tcCallId}]`);
+                    
+                    // UI 表示用マーカーを content に挿入
+                    const marker = `\n⚙️ tooluse[${tcName}][${tcCallId}]\n`;
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: marker },
+                            finish_reason: null
+                        }]
+                    });
+                    const { callId, name, args } = event.value;
+                    log(`[adapter] [tool-store] Stored tool_call_request: ${name} [${callId}]`);
+                    
+                    // SSoT 6.1: ファイル永続化
+                    storeToolContext(sessionKey, callId, { name, args, result: null });
+
+                    // OpenClaw UI 向けのマーカーを送出
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: `\n⚙️ tooluse[${name}][${callId}]\n` },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+
+                case 'tool_result': {
+                    const { callId, name, result } = event.value;
+                    log(`[adapter] [tool-store] Stored tool_result: ${name} [${callId}]`);
+                    
+                    // SSoT 6.1: 結果を追記してファイル永続化
+                    storeToolContext(sessionKey, callId, { result });
+                    break;
+                }
+                
+                case 'finished': {
+                    // finish_reason を送出（ただしプロセス終了時の close イベントでも送るため、二重送信に注意）
+                    break;
+                }
+                
+                case 'error': {
+                    const errMsg = event.value?.error?.message || JSON.stringify(event.value);
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: `\n⚠️ [Gemini Error] ${errMsg}` },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+                
+                case 'loop_detected': {
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: '\n⚠️ Loop detected, stopping execution.' },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+                
+                case 'agent_execution_stopped': {
+                    const reason = event.value?.systemMessage || event.value?.reason || 'stopped';
+                    sseWrite(res, {
+                        id: responseId,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'gemini',
+                        choices: [{
+                            index: 0,
+                            delta: { content: `\n🛑 Agent stopped: ${reason}` },
+                            finish_reason: null
+                        }]
+                    });
+                    break;
+                }
+                
+                default:
+                    log(`[ipc] Unhandled gemini_event type: ${event.type}`);
+                    break;
+            }
+        });
+
+        // --- SSoT 5.0: stdout は IPC に移行したためログ出力のみ ---
         runner.stdout.on('data', chunk => {
             const raw = chunk.toString('utf-8');
-            log(`[stdout] ${raw.substring(0, 200)}`);
-            buffer += raw;
-
-            let boundary = buffer.indexOf('\n');
-            while (boundary !== -1) {
-                const line = buffer.substring(0, boundary).trim();
-                buffer = buffer.substring(boundary + 1);
-                boundary = buffer.indexOf('\n');
-
-                if (!line) continue;
-
-                let json;
-                try { json = JSON.parse(line); } catch (_) { continue; }
-
-                switch (json.type) {
-                    case 'init':
-                    case 'result':
-                        if (json.session_id && onSessionId) {
-                            onSessionId(json.session_id);
-                        }
-                        if (json.type === 'result' && json.status === 'error') {
-                            const errMsg = json.error ? json.error.message : JSON.stringify(json);
-                            sseWrite(res, {
-                                id: responseId,
-                                object: 'chat.completion.chunk',
-                                created: Math.floor(Date.now() / 1000),
-                                model: 'gemini',
-                                choices: [{
-                                    index: 0,
-                                    delta: { content: `\n⚠️ [Gemini API Error] ${errMsg}` },
-                                    finish_reason: null
-                                }]
-                            });
-                        }
-                        break;
-
-                    case 'stream':
-                    case 'message':
-                        // Gemini CLIの stream-json は 'user' メッセージもダンプするため、AIの返答のみを抽出
-                        if (json.role === 'assistant' || json.role === 'model') {
-                            if (json.content) {
-                                if (!perfFirstToken) {
-                                    perfFirstToken = Date.now();
-                                    log(`[perf] Time To First Token: ${((perfFirstToken - perfStart) / 1000).toFixed(2)}s`);
-                                }
-                                fullText += json.content;
-
-                                // SSoT 4.2: 直前がツール出力だった場合、地の文との間に改行を挟む
-                                let finalContent = json.content;
-                                if (lastWasTool && json.content.trim()) {
-                                    finalContent = '\n' + json.content;
-                                    lastWasTool = false;
-                                }
-
-                                sseWrite(res, {
-                                    id: responseId,
-                                    object: 'chat.completion.chunk',
-                                    created: Math.floor(Date.now() / 1000),
-                                    model: 'gemini',
-                                    choices: [{
-                                        index: 0,
-                                        delta: { content: finalContent },
-                                        finish_reason: null
-                                    }]
-                                });
-                            }
-                        }
-                        break;
-
-                    case 'tool_use': {
-                        // SSoT 4.0: サーバーサイド・コンテキスト・リハイドレーション (tool_use用)
-                        // 巨大な引数(パラメータ)を持つツール使用通知をセッションごとにローカル保存し、OpenClawには軽量なポインタ(ZWC)のみを返す
-                        const contextStoreDir = path.join(__dir, 'logs', 'contexts', sessionKey || 'default');
-                        if (!fs.existsSync(contextStoreDir)) {
-                            fs.mkdirSync(contextStoreDir, { recursive: true });
-                        }
-
-                        // 実データをローカルに保存 (tool_use_id をファイル名にする)
-                        const contextPath = path.join(contextStoreDir, `tool_use_${json.tool_id}.json`);
-                        try {
-                            fs.writeFileSync(contextPath, JSON.stringify(json), 'utf-8');
-                        } catch (e) {
-                            log(`[adapter] Failed to save context for tool_use ${json.tool_id}: ${e.message}`);
-                        }
-
-                        // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
-                        // 全角スペース (　) のみでインデントを構成。記号なしでもレンダラーによるトリミングを回避可能。
-                        lastWasTool = true;
-                        sseWrite(res, {
-                            id: responseId,
-                            object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: `\n　　　⚙️ Using tool [${json.tool_name}] [id:${json.tool_id}] ...` },
-                                finish_reason: null
-                            }]
-                        });
-                        break;
-                    }
-
-                    case 'tool_result': {
-                        // SSoT 4.0: サーバーサイド・コンテキスト・リハイドレーション
-                        // 巨大なツール実行結果をセッションごとにローカル保存し、OpenClawには軽量なポインタ(ZWC)のみを返す
-                        const isSuccess = json.status === 'success' && !json.error;
-                        const statusIcon = isSuccess ? '✅' : '❌';
-                        let toolMsg;
-                        if (isSuccess) {
-                            toolMsg = `${statusIcon} Tool finished.`;
-                        } else if (json.error) {
-                            toolMsg = `${statusIcon} Tool failed. Error: ${json.error}`;
-                        } else if (json.exitCode !== undefined && json.exitCode !== 0) {
-                            toolMsg = `${statusIcon} Tool failed. (Exit Code: ${json.exitCode})`;
-                        } else {
-                            toolMsg = `${statusIcon} Tool finished with unknown status.`;
-                        }
-
-                        // セッション専用のコンテキストストレージを準備
-                        const contextStoreDir = path.join(__dir, 'logs', 'contexts', sessionKey || 'default');
-                        if (!fs.existsSync(contextStoreDir)) {
-                            fs.mkdirSync(contextStoreDir, { recursive: true });
-                        }
-
-                        // 実データをローカルに保存 (tool_id をファイル名にする)
-                        const contextPath = path.join(contextStoreDir, `tool_${json.tool_id}.json`);
-                        try {
-                            fs.writeFileSync(contextPath, JSON.stringify(json), 'utf-8');
-                        } catch (e) {
-                            log(`[adapter] Failed to save context for ${json.tool_id}: ${e.message}`);
-                        }
-
-                        // SSoT 4.2: プレーンテキスト・ポインタ方式 (ZWC 廃止)
-                        // 全角スペースのみのインデント。
-                        lastWasTool = true;
-                        sseWrite(res, {
-                            id: responseId,
-                            object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: `\n　　　${toolMsg} [res:${json.tool_id}]` },
-                                finish_reason: null
-                            }]
-                        });
-                        break;
-                    }
-
-                    case 'error':
-                        sseWrite(res, {
-                            id: responseId,
-                            object: 'chat.completion.chunk',
-                            created: Math.floor(Date.now() / 1000),
-                            model: 'gemini',
-                            choices: [{
-                                index: 0,
-                                delta: { content: `\n⚠️ ${json.message || JSON.stringify(json)}` },
-                                finish_reason: null
-                            }]
-                        });
-                        break;
-                }
-            }
+            log(`[stdout-passthrough] ${raw.substring(0, 200)}`);
         });
 
         let stderr = '';

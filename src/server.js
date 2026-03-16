@@ -203,11 +203,29 @@ const server = http.createServer(async (req, res) => {
                     isArray = true;
                 }
                 
-                const errIdx = contentStr.indexOf('⚠️ [Gemini API Error]');
+                // SSoT 6.0: 旧 SSoT 5.1 形式の装飾ログ（⚙️ **toolname**\n```json...```）を除去
+                // ※ 新方式の ⚙️ tooluse[name][id] マーカーは保持する
+                const legacyToolLogRE = /\n?⚙️ \*\*[^*]+\*\*\n```json[\s\S]*?```/g;
+                let cleanStr = contentStr.replace(legacyToolLogRE, '');
+                if (cleanStr !== contentStr) {
+                    if (cleanStr.trim() === '') {
+                        messages.splice(i, 1);
+                        log(`[adapter] Cleansed legacy SSoT 5.1 tool log (empty result) at index ${i}`);
+                        continue;
+                    }
+                    if (isArray) {
+                        msg.content = [{ type: 'text', text: cleanStr }];
+                    } else {
+                        msg.content = cleanStr;
+                    }
+                    log(`[adapter] Cleansed legacy SSoT 5.1 tool log from history at index ${i}`);
+                }
+
+                const errIdx = cleanStr.indexOf('⚠️ [Gemini API Error]');
                 if (errIdx !== -1) {
                     // Also remove the preceding newline if it exists
-                    const sliceIdx = errIdx > 0 && contentStr[errIdx - 1] === '\n' ? errIdx - 1 : errIdx;
-                    const cleanStr = contentStr.substring(0, sliceIdx);
+                    const sliceIdx = errIdx > 0 && cleanStr[errIdx - 1] === '\n' ? errIdx - 1 : errIdx;
+                    cleanStr = cleanStr.substring(0, sliceIdx);
                     
                     if (cleanStr.trim() === '') {
                         // If the message is completely empty after removing the error, remove the whole message
@@ -246,20 +264,50 @@ const server = http.createServer(async (req, res) => {
         // Gemini CLIはファイル拡張子を自動判別するため、画像以外（音声・動画・PDF等）も拾う
         const mediaPaths = [];
         const mediaAttachedPattern = /\[media attached(?:\s+\d+\/\d+)?:\s*([^\]]+)\]/gi;
+        
+        // DEBUG: 生データをログに出力
+        log(`[debug] lastUserText (first 500 chars): ${lastUserText.substring(0, 500)}`);
+        
         let mMatch;
         while ((mMatch = mediaAttachedPattern.exec(lastUserText)) !== null) {
             const content = mMatch[1].trim();
+            log(`[debug] media attached content found: "${content}"`);
             // "3 files" のようなサマリーはスキップ
             if (/^\d+\s+files?$/i.test(content)) continue;
             // パスを抽出: "| url" や "(mime)" より前の部分が絶対パス
-            // フォーマット: /path/to/file (mime/type) | url
-            // もしくは:     /path/to/file | url
-            // もしくは:     /path/to/file
             const pathPart = content.split(/\s*[|(]\s*/)[0].trim();
-            if (pathPart && pathPart.startsWith('/')) {
+            log(`[debug] pathPart extracted: "${pathPart}"`);
+            if (pathPart && (pathPart.startsWith('/') || pathPart.includes(':\\'))) {
                 mediaPaths.push(pathPart);
             }
         }
+
+        // --- WebUI / image_url オブジェクト形式のセカンダリスキャン ---
+        // Telegram 経由は文字列マーカーだが、WebUI は OpenAI 互換のオブジェクト形式で送るため。
+        if (Array.isArray(lastUserMsg?.content)) {
+            for (const part of lastUserMsg.content) {
+                if (part && part.type === 'image_url' && part.image_url?.url) {
+                    const url = part.image_url.url;
+                    // data:image/... (base64) は現時点ではスキップ（Gemini CLI はファイルパスが必要）
+                    if (url.startsWith('data:')) {
+                        log(`[debug] image_url data-URI detected (skipped for now): ${url.substring(0, 60)}...`);
+                        continue;
+                    }
+                    // file:// 形式を絶対パスに変換
+                    const filePath = url.startsWith('file://') ? url.slice('file://'.length) : url;
+                    if (filePath.startsWith('/') || filePath.includes(':\\')) {
+                        // 重複チェック
+                        if (!mediaPaths.includes(filePath)) {
+                            log(`[debug] image_url path added: "${filePath}"`);
+                            mediaPaths.push(filePath);
+                        }
+                    } else {
+                        log(`[debug] image_url not a local path (skipped): "${url.substring(0, 100)}"`);
+                    }
+                }
+            }
+        }
+        log(`[debug] Final mediaPaths: ${JSON.stringify(mediaPaths)}`);
 
         // Separate history from the prompt
         const lastUserIdx = messages.findLastIndex ? messages.findLastIndex(m => m.role === 'user')
@@ -306,7 +354,6 @@ const server = http.createServer(async (req, res) => {
                 requestId,
                 onSessionId: null,
                 sessionKey: `__summarize_${requestId}`,
-                skipZwcProcessing: true,
             });
 
             try { fs.rmSync(sumSystemMdPath); } catch (_) {}

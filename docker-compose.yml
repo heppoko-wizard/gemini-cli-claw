@@ -25,4 +25,6 @@ services:
       - ${HOST_WORKSPACE_DIR:-~/openclaw-workspace}:/workspace
       # Mount Tailscale socket for OpenClaw native Serve integration
       - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      # Mount logs directory for debugging (SSoT 6.0)
+      - ./logs:/app/logs
     # Additional capabilities might be required depending on network features, but usually host network is enough.
