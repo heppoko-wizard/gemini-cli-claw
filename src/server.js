@@ -12,6 +12,7 @@
 const fs = require('fs');
 const http = require('http');
 const { log, randomId, sseWrite } = require('./utils');
+const { saveBase64Image } = require('./media');
 const { extractText } = require('./converter');
 const { loadSessionMap, saveSessionMap } = require('./session');
 const { prepareGeminiEnv, runGeminiStreaming } = require('./streaming');
@@ -290,7 +291,13 @@ const server = http.createServer(async (req, res) => {
                     const url = part.image_url.url;
                     // data:image/... (base64) は現時点ではスキップ（Gemini CLI はファイルパスが必要）
                     if (url.startsWith('data:')) {
-                        log(`[debug] image_url data-URI detected (skipped for now): ${url.substring(0, 60)}...`);
+                        const localPath = saveBase64Image(url);
+                        if (localPath && !mediaPaths.includes(localPath)) {
+                            log(`[debug] image_url data-URI decoded and added: "${localPath}"`);
+                            mediaPaths.push(localPath);
+                        } else if (!localPath) {
+                            log(`[debug] Failed to decode data-URI, skipping.`);
+                        }
                         continue;
                     }
                     // file:// 形式を絶対パスに変換

@@ -53,3 +53,6 @@ OpenClaw 側では、アダプターの出力した `content` と `reasoning_con
 
 - **対応ステータス**: 完了 (Completed)
 - **解決策の詳細**: `src/streaming.js` の `resumedSessionData` 生成ロジックを参照。
+
+### 追記：ハリティ（Hallucination Artifacts）の発生について
+調査の過程でログに現れた `ctrl46` という異常なタグ、および `⚙️ tooluse[name]{args}` という不正なマーカー形式は、コードベースの不備ではなく、LLM が過去の断片的なコンテキスト（汚染された履歴）から生成した**「履歴ハルシネーション（幻覚）」**であることが確定しました。SSoT 6.0 への移行により、マーカー形式が `[name][callId]` に厳密に固定されたことで、この現象も収束に向かうものと判断されます。

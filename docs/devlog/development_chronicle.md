@@ -1344,3 +1344,28 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
 - `docs/investigation/035_ssot_6_architecture_design.md` — 最終アーキテクチャ設計。
 - `docs/investigation/036_openclaw_intercept_mechanism_analysis.md` — インターセプト原理の解明。
 
+---
+
+## [2026-03-17] Session 50: WebUI 画像表示機能の実装と調査履歴のクレンジング
+
+### やったこと
+- **WebUI 画像表示機能の実装**:
+    - **課題**: OpenClaw WebUI から送信される Base64 Data URI 形式の画像が、アダプター (`src/server.js`) でスキップされていたため、Gemini CLI に画像が渡っていなかった。
+    - **解決策**: 新しいユーティリティ `src/media.js` を作成し、Base64 データのデコード、MIME タイプによる拡張子判定、一時ファイル (`/tmp/gemini-media-*`) への保存、およびログ出力機能を実装。
+    - **統合**: `src/server.js` を修正し、`image_url` オブジェクト内の Data URI を検知した際に `media.js` を呼び出してデコード・保存し、その絶対パスを `mediaPaths` 配列に追加するようにした。
+- **Gemini CLI 画像入力仕様の再確認**:
+    - `src/runner.mjs` を調査し、`mediaPaths` に格納されたパスが `@` 構文で入力に注入され、同時に `WorkspaceContext` の `addReadOnlyPath` に自動登録される既存ロジックを再確認。これにより、追加の権限設定なしで画像が Gemini に渡ることを担保した。
+- **タグ問題の終結（ハルシネーションの特定）**:
+    - 履歴に含まれていた `ctrl46` などの異常なタグおよび `⚙️ tooluse[name]{args}` 形式のマーカーについて徹底調査。
+    - コードベースに生成ロジックが存在せず、また再現性もなかったことから、LLM による一時的な「履歴ハルシネーション」であると結論付け、調査を終了した。
+
+### 発見・学んだこと
+- **Gemini CLI (@google/gemini-cli) の設計意図**: `mediaPaths` を渡すだけで、セキュリティ上の制約も含めて処理してくれる `runner.mjs` の設計の堅牢さを再認識した。
+- **偽情報の精査**: ログに現れた異常なタグであっても、それがコードから生成されたものか、モデルの出力によるものかを慎重に切り分けることの重要性を学んだ。
+
+### 変更したファイル
+- `src/media.js` — 新規作成：Base64 画像のデコード and 一時保存。
+- `src/server.js` — Base64 データのパース and `media.js` の統合。
+- `docs/investigation/037_webui_image_handling_investigation.md` — 調査報告書。
+- `docs/investigation/033_history_normalization_failure_analysis.md` — 調査終了（ハルシネーション判定）の記録。
+
