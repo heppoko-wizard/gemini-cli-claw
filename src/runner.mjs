@@ -54,7 +54,20 @@ async function main() {
 
     process.on('message', async (message) => {
         if (message.type === 'run') {
-            const { input, prompt_id, resumedSessionData, model, mediaPaths } = message;
+            const runnerPerfStart = Date.now();
+            console.error(`[Runner:perf] [${new Date().toISOString()}] Received 'run' message. Starting execution...`);
+
+            const { input, prompt_id, resumedSessionData, model, mediaPaths, systemMdPath, sessionKey } = message;
+
+            // --- SSoT 6.3: 環境変数のプロパゲート (DTO対応) ---
+            if (systemMdPath) {
+                process.env.GEMINI_SYSTEM_MD = systemMdPath;
+            }
+            if (sessionKey) {
+                process.env.OPENCLAW_SESSION_KEY = sessionKey;
+            }
+            console.error(`[Runner:perf] GEMINI_CLI_HOME: ${process.env.GEMINI_CLI_HOME}`);
+            console.error(`[Runner:perf] Context binding (DTO) took ${Date.now() - runnerPerfStart}ms`);
 
             // --- SSoT 5.0: 全イベント傍受＋IPC送信 ---
             if (config && config.getGeminiClient) {
@@ -82,10 +95,14 @@ async function main() {
                         yield event;
                     }
                 };
+                console.error(`[Runner:perf] Event interceptor setup took ${Date.now() - runnerPerfStart}ms`);
             }
+
             try {
                 if (resumedSessionData && resumedSessionData.conversation) {
+                    const sidStart = Date.now();
                     config.setSessionId(resumedSessionData.conversation.sessionId);
+                    console.error(`[Runner:perf] setSessionId took ${Date.now() - sidStart}ms`);
                 }
                 
                 if (model) {
@@ -96,15 +113,12 @@ async function main() {
                     console.log(`[Runner] Using model: ${model}`);
                 }
 
-                // メディアパスを @path 形式で入力に付加し、同時にアクセス許可のためにWorkspaceContextに追加する
-                // Gemini CLI は @/path/to/file 構文でローカルファイルを読み込むが、TargetDir外のファイルは弾くため
                 let finalInput = input;
                 if (Array.isArray(mediaPaths) && mediaPaths.length > 0) {
+                    const mediaStart = Date.now();
                     const atPaths = [];
                     for (const p of mediaPaths) {
                         if (typeof p === 'string' && p.startsWith('/')) {
-                            // Gemini CLIのセキュリティ制約（Workspace外ファイル読み取り禁止）を回避するため、
-                            // パスを ReadOnlyPath として登録する
                             try {
                                 config.getWorkspaceContext().addReadOnlyPath(p);
                             } catch (e) {
@@ -114,12 +128,14 @@ async function main() {
                         }
                     }
                     if (atPaths.length > 0) {
-                        console.log(`[Runner] Injecting ${atPaths.length} media path(s): ${atPaths.join(', ')}`);
                         finalInput = atPaths.join(' ') + '\n' + (input || '');
                     }
+                    console.error(`[Runner:perf] Media path setup took ${Date.now() - mediaStart}ms`);
                 }
 
-                // gemini.js のメインループを呼び出す
+                console.error(`[Runner:perf] Calling runNonInteractive... (Current Offset: ${Date.now() - runnerPerfStart}ms)`);
+                const runStart = Date.now();
+                
                 await runNonInteractive({
                     config,
                     settings,
@@ -128,7 +144,7 @@ async function main() {
                     resumedSessionData,
                 });
                 
-                // ストリーミング・実行が終わったら終了
+                console.error(`[Runner:perf] runNonInteractive finished. (Took ${Date.now() - runStart}ms, Total: ${Date.now() - runnerPerfStart}ms)`);
                 process.exit(ExitCodes.SUCCESS);
             } catch (error) {
                 console.error("[Runner] Error during execution:", error);

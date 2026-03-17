@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { log, randomId, sseWrite } = require('./utils');
+const { log, debug, randomId, sseWrite } = require('./utils');
 
 // ---------------------------------------------------------------------------
 // SSoT 6.0: ツールコンテキストストア
@@ -75,79 +75,6 @@ function loadToolContext(sessionKey, callId) {
 }
 
 
-// ---------------------------------------------------------------------------
-// Gemini CLI discovery
-// ---------------------------------------------------------------------------
-
-const __dir = path.resolve(__dirname, '..');
-
-// ---------------------------------------------------------------------------
-// Per-session Gemini CLI environment setup
-// ---------------------------------------------------------------------------
-
-/**
- * Prepare an isolated GEMINI_CLI_HOME directory for this OpenClaw session,
- * injecting our MCP server and copying auth credentials.
- *
- * Returns { env, chatsDir, tempSystemMdPath }.
- */
-function prepareGeminiEnv({ sessionKey, workspaceDir, systemPrompt }) {
-    const homeBaseDir = path.join(__dir, 'gemini-home', 'gemini-sessions');
-    const tempHomeDir = path.join(homeBaseDir, sessionKey);
-    const tempGeminiDir = path.join(tempHomeDir, '.gemini');
-    const chatsDir = path.join(tempGeminiDir, 'tmp', 'openclaw-gemini-cli-adapter', 'chats');
-
-    fs.mkdirSync(chatsDir, { recursive: true });
-
-    // --- settings.json with MCP server injection ---
-    const realGeminiHome = process.env.GEMINI_CLI_HOME;
-    if (!realGeminiHome) {
-        throw new Error("CRITICAL: GEMINI_CLI_HOME environment variable is not defined.");
-    }
-    const realGeminiDir = path.join(realGeminiHome, '.gemini');
-    const realSettingsPath = path.join(realGeminiDir, 'settings.json');
-    let userSettings = {};
-    try {
-        if (fs.existsSync(realSettingsPath)) {
-            userSettings = JSON.parse(fs.readFileSync(realSettingsPath, 'utf-8'));
-        }
-    } catch (_) { }
-
-    userSettings.mcpServers = userSettings.mcpServers || {};
-    userSettings.mcpServers['openclaw-tools'] = {
-        command: 'node',
-        args: [path.join(__dir, 'mcp-server.mjs'), sessionKey, workspaceDir || process.cwd()],
-        trust: true,
-    };
-
-    fs.writeFileSync(
-        path.join(tempGeminiDir, 'settings.json'),
-        JSON.stringify(userSettings, null, 2),
-        'utf-8'
-    );
-
-    // --- Copy auth credentials ---
-    for (const file of ['oauth_creds.json', 'google_accounts.json', 'installation_id']) {
-        const src = path.join(realGeminiDir, file);
-        if (!fs.existsSync(src)) continue;
-        try { fs.copyFileSync(src, path.join(tempGeminiDir, file)); } catch (_) { }
-    }
-
-    // --- Write system prompt to a temp .md file ---
-    const tempSystemMdPath = path.join(
-        os.tmpdir(),
-        `gemini-system-${randomId()}.md`
-    );
-    fs.writeFileSync(tempSystemMdPath, systemPrompt || '# OpenClaw Gemini Gateway', 'utf-8');
-
-    const env = {
-        ...process.env,
-        GEMINI_SYSTEM_MD: tempSystemMdPath,
-        GEMINI_CLI_HOME: tempHomeDir,
-    };
-
-    return { env, chatsDir, tempSystemMdPath };
-}
 
 // ---------------------------------------------------------------------------
 // Gemini CLI runner (streaming → SSE)
@@ -159,7 +86,7 @@ const { runnerPool } = require('./runner-pool.js');
  * Spawn Gemini CLI with the provided prompt and optional --resume session,
  * streaming output back as OpenAI-compatible SSE chunks via RunnerPool.
  */
-async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, env, res, requestId, onSessionId, sessionKey }) {
+async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaPaths, systemMdPath, res, requestId, onSessionId, sessionKey }) {
     const responseId = `resp_${requestId}`;
     const perfStart = Date.now();
     let perfFirstToken = null;
@@ -181,6 +108,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
     let killRunner = null;
 
     try {
+        const rehydrateStart = Date.now();
         log(`[adapter] Acquiring runner for sessionKey: ${sessionKey}`);
 
         // 履歴をGemini CLIの内部SessionData形式に合成する (SSoT 3.0)
@@ -274,16 +202,20 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 filePath: 'memory-injected'
             };
         }
+        debug(`[perf] History rehydration (SSoT) took ${Date.now() - rehydrateStart}ms for ${messages.length} messages.`);
 
         // 1. プールからRunnerプロセスを取得（またはキュー待ち）
+        const poolAcquireStart = Date.now();
         const runner = await runnerPool.acquireRunner({
             input: prompt,
             promptId: requestId,
             resumedSessionData,
             model: model,
-            env: env,
+            systemMdPath: systemMdPath,
+            sessionKey: sessionKey,
             mediaPaths: mediaPaths
         });
+        debug(`[perf] Runner acquisition from pool took ${Date.now() - poolAcquireStart}ms`);
 
         // --- Abort ハンドル: 外部（server.js）から Runner を停止するためのインターフェース ---
         let aborted = false;
@@ -471,8 +403,13 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
             log(`[stdout-passthrough] ${raw.substring(0, 200)}`);
         });
 
-        let stderr = '';
-        runner.stderr.on('data', chunk => { stderr += chunk.toString('utf-8'); });
+        runner.stderr.on('data', chunk => {
+            const raw = chunk.toString('utf-8');
+            stderr += raw;
+            if (process.env.DEBUG === '1' || process.env.DEBUG === 'true') {
+                process.stderr.write(`[Runner:stderr] ${raw}`);
+            }
+        });
 
         // 3. プロセスが終了したら完了レスポンスを送る
         runner.on('close', (code, signal) => {
@@ -534,4 +471,4 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
     return { kill: killRunner };
 }
 
-module.exports = { prepareGeminiEnv, runGeminiStreaming };
+module.exports = { runGeminiStreaming };

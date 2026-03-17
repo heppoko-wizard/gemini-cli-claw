@@ -11,11 +11,11 @@
 
 const fs = require('fs');
 const http = require('http');
-const { log, randomId, sseWrite } = require('./utils');
+const { log, debug, randomId, sseWrite } = require('./utils');
 const { saveBase64Image } = require('./media');
 const { extractText } = require('./converter');
 const { loadSessionMap, saveSessionMap } = require('./session');
-const { prepareGeminiEnv, runGeminiStreaming } = require('./streaming');
+const { runGeminiStreaming } = require('./streaming');
 
 // ---------------------------------------------------------------------------
 // Summarization intercept
@@ -129,6 +129,7 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+    const reqStart = Date.now();
     const url = new URL(req.url, `http://localhost:${PORT}`);
     log(`Incoming request: ${req.method} ${url.pathname}`);
     if (req.method === 'POST') log(`Headers: ${JSON.stringify(req.headers)}`);
@@ -337,18 +338,8 @@ const server = http.createServer(async (req, res) => {
         // while Gemini CLI's memory (the SSoT) remains untouched.
         if (isSummarizationRequest(systemPrompt, promptText)) {
             log(`[summarize] Summarization request detected — delegating to Gemini CLI (isolated session)`);
-            let sumEnv, sumSystemMdPath;
-            try {
-                ({ env: sumEnv, tempSystemMdPath: sumSystemMdPath } = prepareGeminiEnv({
-                    sessionKey: `__summarize_${requestId}`,
-                    workspaceDir,
-                    systemPrompt,
-                }));
-            } catch (e) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: `Failed to prepare summarization env: ${e.message}` }));
-                return;
-            }
+            const sumSystemMdPath = require('path').join(require('os').tmpdir(), `gemini-system-__summarize_${requestId}.md`);
+            fs.writeFileSync(sumSystemMdPath, systemPrompt || '', 'utf-8');
 
             await runGeminiStreaming({
                 prompt: promptText,
@@ -356,7 +347,7 @@ const server = http.createServer(async (req, res) => {
                 model: reqModel,
                 sessionName: null,
                 mediaPaths: [],
-                env: sumEnv,
+                systemMdPath: sumSystemMdPath,
                 res,
                 requestId,
                 onSessionId: null,
@@ -368,15 +359,11 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // Set up Gemini environment
-        let env, chatsDir, tempSystemMdPath;
-        try {
-            ({ env, chatsDir, tempSystemMdPath } = prepareGeminiEnv({ sessionKey, workspaceDir, systemPrompt }));
-        } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: `Failed to prepare Gemini env: ${e.message}` }));
-            return;
-        }
+        // Set up Gemini system MD (SSoT 6.3)
+        const systemMdSetupStart = Date.now();
+        const tempSystemMdPath = require('path').join(require('os').tmpdir(), `gemini-system-${requestId}.md`);
+        fs.writeFileSync(tempSystemMdPath, systemPrompt || '# OpenClaw Gemini Gateway', 'utf-8');
+        debug(`[perf] System MD setup took ${Date.now() - systemMdSetupStart}ms (Path: ${tempSystemMdPath})`);
 
         // Look up existing Gemini session ID for this OpenClaw session
         // SSoT: We NO LONGER overwrite Gemini's session with client history.
@@ -408,13 +395,14 @@ const server = http.createServer(async (req, res) => {
                 try { fs.rmSync(tempSystemMdPath); } catch (_) { }
             });
 
+            debug(`[perf] Request processing before runGeminiStreaming took ${Date.now() - reqStart}ms`);
             abortHandle = await runGeminiStreaming({
                 prompt: promptText,
                 messages: historyMessages.concat(messages.slice(lastUserIdx)),
                 model: reqModel,
                 sessionName: geminiSessionId,
                 mediaPaths,
-                env,
+                systemMdPath: tempSystemMdPath,
                 res,
                 requestId,
                 onSessionId: (capturedId) => {
@@ -456,7 +444,7 @@ const server = http.createServer(async (req, res) => {
                 model: reqModel,
                 sessionName: geminiSessionId,
                 mediaPaths,
-                env,
+                systemMdPath: tempSystemMdPath,
                 req,
                 res: fakeRes,
                 requestId,

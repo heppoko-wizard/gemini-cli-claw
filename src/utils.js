@@ -2,12 +2,23 @@
 
 const crypto = require('crypto');
 
+function getTimestamp() {
+    const now = new Date();
+    return now.toISOString().replace('Z', '').split('T')[1]; // HH:mm:ss.SSS
+}
+
 function log(...args) {
-    console.error(`[${new Date().toISOString()}] [adapter]`, ...args);
+    console.error(`[${getTimestamp()}] [adapter]`, ...args);
+}
+
+function debug(...args) {
+    if (process.env.DEBUG === '1' || process.env.DEBUG === 'true') {
+        console.error(`[${getTimestamp()}] [adapter:debug]`, ...args);
+    }
 }
 
 function randomId() {
-    return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
+    return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
 }
 
 /**
@@ -22,4 +33,4 @@ function sseWrite(res, data, eventType) {
     }
 }
 
-module.exports = { log, randomId, sseWrite };
+module.exports = { log, debug, randomId, sseWrite };

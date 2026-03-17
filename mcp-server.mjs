@@ -322,7 +322,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
 
 // ---------- [4] Startup ----------
 async function run() {
-    const sessionKey = process.argv[2] || "mcp-default";
+    const sessionKey = process.argv[2] || process.env.OPENCLAW_SESSION_KEY || "mcp-default";
     const workspaceDir = process.argv[3] || undefined;
 
     await loadOpenClawTools(sessionKey, workspaceDir);

@@ -119,7 +119,7 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
     const mcpLogPath = path.join(baseDir, 'logs', 'mcp.log');
     userSettings.mcpServers['openclaw-tools'] = {
         command: 'bash',
-        args: ['-c', `node "${path.join(baseDir, 'mcp-server.mjs')}" "pool-shared" "${workspaceCwd}" 2>> "${mcpLogPath}"`],
+        args: ['-c', `node "${path.join(baseDir, 'mcp-server.mjs')}" "" "${workspaceCwd}" 2>> "${mcpLogPath}"`],
         trust: true
     };
 
@@ -226,6 +226,7 @@ class RunnerPool {
         const execCmd = resolveNodeBin();
         console.log(`[Pool] Resolved node binary: ${execCmd}`);
 
+        const spawnStart = Date.now();
         const runner = spawn(execCmd, [runnerPath, '--approval-mode=yolo', '--sandbox=false', '-o', 'stream-json'], {
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             cwd: this.workspaceCwd,
@@ -247,7 +248,8 @@ class RunnerPool {
             if (isReady) return;
             isReady = true;
             this.isSpawning = false;
-            console.log("[Pool] Runner is ready to accept requests.");
+            const dur = Date.now() - spawnStart;
+            console.log(`[Pool] Runner is ready to accept requests (startup took ${dur}ms).`);
 
             // キューに待たせているリクエストがあれば即時ひも付け
             if (this.pendingRequests.length > 0) {
@@ -270,13 +272,10 @@ class RunnerPool {
         let startupStderr = '';
         runner.stderr.on('data', (chunk) => {
             const raw = chunk.toString();
-            // 起動時のエラーをキャッチしてログに出す
+            // 常にエラーをログに出す（原因特定のため）
+            console.error(`[Pool] Runner stderr: ${raw.trim()}`);
             if (!isReady) {
                 startupStderr += raw;
-                // 万が一致命的なエラーならログを出す
-                if (startupStderr.includes('Error') || startupStderr.includes('Exception')) {
-                    console.error(`[Pool] Runner startup stderr: ${raw.trim()}`);
-                }
             }
         });
 
@@ -332,7 +331,8 @@ class RunnerPool {
             prompt_id: request.promptId,
             resumedSessionData: request.resumedSessionData,
             model: request.model,
-            env: request.env,
+            systemMdPath: request.systemMdPath,
+            sessionKey: request.sessionKey,
             mediaPaths: request.mediaPaths
         });
 

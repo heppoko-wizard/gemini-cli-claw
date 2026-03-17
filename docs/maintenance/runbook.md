@@ -75,7 +75,7 @@ cd "$(npm root -g)/openclaw/openclaw-gemini-cli-adapter"
 
 ## 4. 環境情報
 
-※ `[AdapterDir]` は、npmグローバルパスや現在のワークスペース（`/home/hepowiz/DEV/`など）を指します。古いログは当時の `/home/heppo/` で記録されています。
+※ `[AdapterDir]` は、npmグローバルパスや現在のワークスペース（`/home/heppo/DEV/`など）を指します。古いログは当時の `/home/heppo/` で記録されています。
 
 | 項目 | 値 |
 |------|------|
