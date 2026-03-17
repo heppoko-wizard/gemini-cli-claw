@@ -106,6 +106,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
     // killRunner は try ブロック内で runner 取得後に代入される
     let killRunner = null;
+    let stderr = '';
 
     try {
         const rehydrateStart = Date.now();
@@ -282,22 +283,26 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 }
                 
                 case 'tool_call_request': {
-                    // SSoT 6.0: ツールマーカー ID 方式
-                    // (a) 実データをアダプター側メモリに保存
-                    // (b) OpenClaw に ⚙️ tooluse[name][callId] マーカーを content として送出
+                    // SSoT 6.0/6.1: ツールマーカー ID 方式 (統合済み)
+                    // 1. 実データをアダプター側（メモリ & ファイル）に保存
+                    // 2. OpenClaw に ⚙️ tooluse[name][callId] マーカーのみを content として送出
                     // ※ tool_calls フィールドは一切送出しない（インターセプト完全回避）
                     if (!event.value) break;
                     const tc = event.value;
-                    const tcCallId = tc.callId || tc.id || randomId();
-                    const tcName = tc.name || 'unknown';
+                    const callId = tc.callId || tc.id || randomId();
+                    const name = tc.name || 'unknown';
+                    const args = tc.args || {};
                     
-                    // セッション単位でツールデータを保存
+                    // (a) メモリ保存
                     const sessionStore = getSessionStore(sessionKey);
-                    sessionStore.set(tcCallId, { name: tcName, args: tc.args || {}, result: null });
-                    log(`[tool-store] Stored tool_call_request: ${tcName} [${tcCallId}]`);
+                    sessionStore.set(callId, { name, args, result: null });
                     
-                    // UI 表示用マーカーを content に挿入
-                    const marker = `\n⚙️ tooluse[${tcName}][${tcCallId}]\n`;
+                    // (b) ファイル永続化 (SSoT 6.1)
+                    storeToolContext(sessionKey, callId, { name, args, result: null });
+                    log(`[tool-store] Stored tool_call_request: ${name} [${callId}]`);
+                    
+                    // (c) OpenClaw UI 向けマーカーを content に挿入（1回のみ）
+                    const marker = `\n⚙️ tooluse[${name}][${callId}]\n`;
                     sseWrite(res, {
                         id: responseId,
                         object: 'chat.completion.chunk',
@@ -306,24 +311,6 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         choices: [{
                             index: 0,
                             delta: { content: marker },
-                            finish_reason: null
-                        }]
-                    });
-                    const { callId, name, args } = event.value;
-                    log(`[adapter] [tool-store] Stored tool_call_request: ${name} [${callId}]`);
-                    
-                    // SSoT 6.1: ファイル永続化
-                    storeToolContext(sessionKey, callId, { name, args, result: null });
-
-                    // OpenClaw UI 向けのマーカーを送出
-                    sseWrite(res, {
-                        id: responseId,
-                        object: 'chat.completion.chunk',
-                        created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
-                        choices: [{
-                            index: 0,
-                            delta: { content: `\n⚙️ tooluse[${name}][${callId}]\n` },
                             finish_reason: null
                         }]
                     });
