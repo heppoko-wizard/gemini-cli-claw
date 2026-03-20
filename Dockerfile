@@ -52,7 +52,7 @@ COPY . .
 RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
 # 実行権限の付与
-RUN chmod +x start.sh launch.sh
+RUN chmod +x start.sh
 
 # 環境変数の設定
 ENV NODE_ENV=production

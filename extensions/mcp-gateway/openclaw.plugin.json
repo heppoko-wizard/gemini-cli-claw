@@ -1,0 +1,10 @@
+{
+  "id": "mcp-gateway",
+  "name": "MCP Gateway",
+  "description": "Exposes OpenClaw tools via Gateway RPC for lightweight MCP clients.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

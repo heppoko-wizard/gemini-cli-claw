@@ -58,7 +58,16 @@ if [ ! -s "$OPENCLAW_CONFIG" ]; then
   "gateway": {
     "mode": "local",
     "auth": {
-      "mode": "none"
+      "mode": "none",
+      "token": "openclaw"
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "load": {
+      "paths": [
+        "/app/extensions/mcp-gateway"
+      ]
     }
   }
 }

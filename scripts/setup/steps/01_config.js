@@ -79,7 +79,7 @@ module.exports = async function runStep() {
         settings.mcpServers = settings.mcpServers || {};
         settings.mcpServers["openclaw-tools"] = {
             "command": "node",
-            "args": [path.join(PROJECT_ROOT, "mcp-server.mjs"), "mcp-default", "/workspace"],
+            "args": [path.join(PROJECT_ROOT, "mcp-server-lightweight.mjs"), "", "/workspace"],
             "trust": true
         };
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));

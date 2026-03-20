@@ -8,6 +8,7 @@ logs/contexts
 docs
 memory
 analysis_target_*
+!extensions
 gemini-home
 credentials.json
 .env

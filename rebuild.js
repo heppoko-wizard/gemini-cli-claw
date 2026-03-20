@@ -49,10 +49,35 @@ async function main() {
         let startTime = Date.now();
         let ready = false;
         let dots = '';
+        let errorReason = null;
 
         while (Date.now() - startTime < MAX_WAIT_SEC * 1000) {
             ready = await isServerReady();
             if (ready) break;
+
+            // Check logs for obvious failures
+            const logCheck = await new Promise((resolve) => {
+                const lp = spawn('docker', ['logs', '--tail', '50', 'openclaw-gemini-adapter'], { shell: true });
+                let output = '';
+                lp.stdout.on('data', d => output += d);
+                lp.stderr.on('data', d => output += d);
+                lp.on('close', () => {
+                    if (output.includes('Config invalid') || output.includes('Unrecognized key')) {
+                        const lines = output.split('\n');
+                        const errorLine = lines.find(l => l.includes('Config invalid') || l.includes('Unrecognized key')) || 'Config validation failed';
+                        resolve({ fail: true, reason: errorLine.trim() });
+                    } else if (output.includes('Error: ') || output.includes('FATAL')) {
+                        resolve({ fail: true, reason: 'Server crashed or fatal error detected' });
+                    } else {
+                        resolve({ fail: false });
+                    }
+                });
+            });
+
+            if (logCheck.fail) {
+                errorReason = logCheck.reason;
+                break;
+            }
 
             dots = dots.length > 5 ? '' : dots + '.';
             process.stdout.write(`\r   Booting${dots.padEnd(6)} [${Math.floor((Date.now() - startTime) / 1000)}s]`);
@@ -63,6 +88,9 @@ async function main() {
             console.log('\n\n✅ Server is UP and STABLE!');
             console.log(`🔗 Dashboard: ${CHECK_URL}`);
             console.log('To view logs: docker logs -f openclaw-gemini-adapter');
+        } else if (errorReason) {
+            console.error(`\n\n❌ Boot failed early: ${errorReason}`);
+            console.error('Please fix the configuration and try again.');
         } else {
             console.error('\n\n❌ Timeout: Server did not respond. Please check: docker logs -f openclaw-gemini-adapter');
         }

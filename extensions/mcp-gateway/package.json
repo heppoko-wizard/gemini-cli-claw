@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/mcp-gateway",
+  "version": "1.0.0",
+  "description": "OpenClaw MCP Gateway Plugin for Lightweight Clients",
+  "type": "module",
+  "dependencies": {},
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
