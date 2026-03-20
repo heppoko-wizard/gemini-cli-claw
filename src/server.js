@@ -346,7 +346,6 @@ const server = http.createServer(async (req, res) => {
                 try { fs.rmSync(tempSystemMdPath); } catch (_) { }
             });
 
-            debug(`[perf] Request processing before runGeminiStreaming took ${Date.now() - reqStart}ms`);
             abortHandle = await runGeminiStreaming({
                 prompt: promptText,
                 messages: historyMessages.concat(messages.slice(lastUserIdx)),
