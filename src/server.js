@@ -118,7 +118,9 @@ function readBody(req) {
         req.on('end', () => {
             try {
                 const rawBuffer = Buffer.concat(chunks);
-                fs.writeFileSync(require('path').join(__dirname, '../logs/raw_req.bin'), rawBuffer);
+                if (process.env.ADAPTER_DEBUG === 'true') {
+                    fs.writeFileSync(require('path').join(__dirname, '../logs/raw_req.bin'), rawBuffer);
+                }
                 const data = rawBuffer.toString('utf8');
                 resolve(JSON.parse(data));
             }
@@ -174,11 +176,13 @@ const server = http.createServer(async (req, res) => {
         let body;
         try {
             body = await readBody(req);
-            const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
-            const logDir = require('path').dirname(logPath);
-            if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-            fs.writeFileSync(logPath, JSON.stringify(body, null, 2), 'utf-8');
-            log(`Request body saved to logs/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
+            if (process.env.ADAPTER_DEBUG === 'true') {
+                const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
+                const logDir = require('path').dirname(logPath);
+                if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+                fs.writeFileSync(logPath, JSON.stringify(body, null, 2), 'utf-8');
+                log(`Request body saved to logs/adapter_last_req.json. Num messages: ${(body.input || body.messages || []).length}`);
+            }
         }
         catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' });

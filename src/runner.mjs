@@ -55,7 +55,7 @@ async function main() {
     process.on('message', async (message) => {
         if (message.type === 'run') {
             const runnerPerfStart = Date.now();
-            console.error(`[Runner:perf] [${new Date().toISOString()}] Received 'run' message. Starting execution...`);
+            if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] [${new Date().toISOString()}] Received 'run' message. Starting execution...`);
 
             const { input, prompt_id, resumedSessionData, model, mediaPaths, systemMdPath, sessionKey } = message;
 
@@ -66,28 +66,77 @@ async function main() {
             if (sessionKey) {
                 process.env.OPENCLAW_SESSION_KEY = sessionKey;
             }
-            console.error(`[Runner:perf] GEMINI_CLI_HOME: ${process.env.GEMINI_CLI_HOME}`);
-            console.error(`[Runner:perf] Context binding (DTO) took ${Date.now() - runnerPerfStart}ms`);
+            if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] GEMINI_CLI_HOME: ${process.env.GEMINI_CLI_HOME}`);
+            if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] Context binding (DTO) took ${Date.now() - runnerPerfStart}ms`);
 
             // --- SSoT 5.0: 全イベント傍受＋IPC送信 ---
             if (config && config.getGeminiClient) {
                 const geminiClient = config.getGeminiClient();
                 const originalSendMessageStream = geminiClient.sendMessageStream.bind(geminiClient);
-                
+
                 geminiClient.sendMessageStream = async function* (...args) {
                     const gen = originalSendMessageStream(...args);
                     for await (const event of gen) {
                         if (process.send) {
                             try {
-                                process.send({
-                                    type: 'gemini_event',
-                                    event: {
-                                        type: event.type,
-                                        value: event.value,
-                                        traceId: event.traceId,
-                                        reason: event.reason,
-                                    }
-                                });
+                                // SSoT 6.5: IPC 健全化 - 履歴構築に必要な最小限のプロパティのみを抽出 (Pick)
+                                // 巨大な AgentConfig や History オブジェクトのシリアライズによる OOM を物理的に防ぐ
+                                let pickedValue = null;
+                                let shouldSend = false;
+
+                                switch (event.type) {
+                                    case 'content':
+                                        pickedValue = typeof event.value === 'string' ? event.value : null;
+                                        shouldSend = true;
+                                        break;
+                                    case 'thought':
+                                        pickedValue = event.value ? {
+                                            description: event.value.description,
+                                            subject: event.value.subject
+                                        } : null;
+                                        shouldSend = true;
+                                        break;
+                                    case 'tool_call_request':
+                                        pickedValue = event.value ? {
+                                            name: event.value.name,
+                                            args: event.value.args,
+                                            callId: event.value.callId || event.value.id
+                                        } : null;
+                                        shouldSend = true;
+                                        break;
+                                    case 'tool_result':
+                                        pickedValue = event.value ? {
+                                            name: event.value.name,
+                                            callId: event.value.callId,
+                                            result: event.value.result
+                                        } : null;
+                                        shouldSend = true;
+                                        break;
+                                    case 'error':
+                                        pickedValue = {
+                                            error: { message: event.value?.error?.message || String(event.value) }
+                                        };
+                                        shouldSend = true;
+                                        break;
+                                    case 'loop_detected':
+                                    case 'agent_execution_stopped':
+                                    case 'agent_execution_blocked':
+                                    case 'finished':
+                                        shouldSend = true;
+                                        break;
+                                }
+
+                                if (shouldSend) {
+                                    process.send({
+                                        type: 'gemini_event',
+                                        event: {
+                                            type: event.type,
+                                            value: pickedValue,
+                                            traceId: event.traceId,
+                                            reason: event.reason,
+                                        }
+                                    });
+                                }
                             } catch (e) {
                                 console.error('[Runner] IPC send failed:', e.message);
                             }
@@ -95,16 +144,16 @@ async function main() {
                         yield event;
                     }
                 };
-                console.error(`[Runner:perf] Event interceptor setup took ${Date.now() - runnerPerfStart}ms`);
+                if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] Event interceptor setup took ${Date.now() - runnerPerfStart}ms`);
             }
 
             try {
                 if (resumedSessionData && resumedSessionData.conversation) {
                     const sidStart = Date.now();
                     config.setSessionId(resumedSessionData.conversation.sessionId);
-                    console.error(`[Runner:perf] setSessionId took ${Date.now() - sidStart}ms`);
+                    if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] setSessionId took ${Date.now() - sidStart}ms`);
                 }
-                
+
                 if (model) {
                     settings.merged.model.name = model;
                     if (config.settings && config.settings.model) {
@@ -130,12 +179,12 @@ async function main() {
                     if (atPaths.length > 0) {
                         finalInput = atPaths.join(' ') + '\n' + (input || '');
                     }
-                    console.error(`[Runner:perf] Media path setup took ${Date.now() - mediaStart}ms`);
+                    if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] Media path setup took ${Date.now() - mediaStart}ms`);
                 }
 
-                console.error(`[Runner:perf] Calling runNonInteractive... (Current Offset: ${Date.now() - runnerPerfStart}ms)`);
+                if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] Calling runNonInteractive... (Current Offset: ${Date.now() - runnerPerfStart}ms)`);
                 const runStart = Date.now();
-                
+
                 await runNonInteractive({
                     config,
                     settings,
@@ -143,8 +192,8 @@ async function main() {
                     prompt_id: prompt_id || Math.random().toString(16).slice(2),
                     resumedSessionData,
                 });
-                
-                console.error(`[Runner:perf] runNonInteractive finished. (Took ${Date.now() - runStart}ms, Total: ${Date.now() - runnerPerfStart}ms)`);
+
+                if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] runNonInteractive finished. (Took ${Date.now() - runStart}ms, Total: ${Date.now() - runnerPerfStart}ms)`);
                 process.exit(ExitCodes.SUCCESS);
             } catch (error) {
                 console.error("[Runner] Error during execution:", error);

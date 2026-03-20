@@ -1396,4 +1396,33 @@ Tailscale 等の信頼できるネットワーク内での利便性を向上さ�
 - `docs/investigation/040_performance_analysis_report.md.resolved` — 根本原因から解決策までの全記録。
 - `docs/proposals/001-003` — 修正計画のトレードオフ議論。
 
+---
+
+## [2026-03-20] Session 52: Runner OOM 障害の根本解決と IPC プロトコルの健全化 (SSoT 6.5)
+
+### やったこと
+- **Runner OOM 障害の特定と分析**:
+    - **課題**: ツール呼び出し時にランナーが `JavaScript heap out of memory` でクラッシュする問題を調査。
+    - **真因**: `DEBUG=true` による Gemini CLI のイベント爆発（数MBの内部状態が全イベントに付随）と、それを無差別に `process.send()` しようとしたアダプターのインターセプターによるメモリ倍増が原因。
+- **IPC プロトコルのサニタイズ（Pick 実装）**:
+    - `runner.mjs` のインターセプターを改修。イベントオブジェクト全体を転送するのではなく、SSE 送信に必要なプロパティ（`content`, `thought`, `tool_call_request` 等）のみを抽出（Pick）して送信するガードロジックを実装。
+- **デバッグ停止とメモリ制約の正常化**:
+    - `docker-compose.yml` で `DEBUG=false` を設定し、巨大イベントの生成自体を停止。
+    - 根本解決を実証するため、一時的な `4GB` 増設を撤回し、デフォルトのメモリ制約（約2GB）に戻して正常稼働を確認。
+- **パフォーマンス計測基盤の導入**:
+    - 初期化のボトルネックを可視化するため、`measure_init.mjs` を導入し、ランナー起動時間をミリ秒単位で計測可能にした。
+
+### 成果
+- 思考プロセス（Thought）のストリーミングという高度な機能を維持しつつ、物理的なメモリ爆発を回避する堅牢なデータフローを確立。
+- メモリ増設に頼らず、ロジックの適正化によって OOM を抜本的に解決した。
+
+### 変更したファイル
+- `src/runner.mjs` — IPC イベントのサニタイズ（Pick 実装）。
+- `docker-compose.yml` — `DEBUG=false` への変更。
+- `src/runner-pool.js` — ログフィルターの解除およびメモリ増設オプションの撤回。
+- `measure_init.mjs`, `src/measure_init.mjs` — パフォーマンス計測ツールの追加。
+- `docs/investigation/042_oom_crash_analysis_report.md` — OOM 調査と解決の全記録。
+- `docs/investigation/adapter_hang_investigation.md` — ハング調査の最終報告。
+- `docs/proposals/003_fix_pattern_C_dto_stateless_refactoring.md` — リファクタリング提案の更新。
+
 

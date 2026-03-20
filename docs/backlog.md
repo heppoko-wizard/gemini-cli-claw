@@ -6,6 +6,7 @@
 - [ ] ZWC パースの堅牢化（破損時のフォールバック処理）
 - [ ] Docker `/tmp` 共有設定の構成 (`docker-compose.yml` のボリュームマウント)
 における `/tmp/openclaw` の共有マウント設定の追加
+- [ ] [技術負債解消] コンテナ起動時のエントリーポイント(`entrypoint.sh`等)で、ホストマウントされたディレクトリの所有者を動的に修正する機構の導入（Docker環境とホスト間のEACCESエラーの根本解決）
         // --- WebUI / image_url オブジェクト形式のセカンダリスキャン ---
         // Telegram 経由は文字列マーカーだが、WebUI は OpenAI 互換のオブジェクト形式で送るため。
         if (Array.isArray(lastUserMsg?.content)) {

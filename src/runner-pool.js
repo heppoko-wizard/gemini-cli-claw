@@ -272,10 +272,13 @@ class RunnerPool {
         let startupStderr = '';
         runner.stderr.on('data', (chunk) => {
             const raw = chunk.toString();
-            // 常にエラーをログに出す（原因特定のため）
-            console.error(`[Pool] Runner stderr: ${raw.trim()}`);
             if (!isReady) {
+                // 起動前：エラーを蓄積してログに出す
                 startupStderr += raw;
+                console.error(`[Pool] Runner stderr: ${raw.trim()}`);
+            } else {
+                // 起動後：すべてのログを出す（調査のためフィルター解除）
+                console.error(`[Runner:stderr] ${raw.trim()}`);
             }
         });
 

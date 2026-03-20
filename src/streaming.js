@@ -13,36 +13,31 @@ const { log, debug, randomId, sseWrite } = require('./utils');
 // Gemini CLI 向けの正規 toolCalls 構造に復元する。
 // ---------------------------------------------------------------------------
 
-// セッションキー → callId → { name, args, result } のネストした Map
-const toolMemoryStore = new Map();
-const CONTEXT_BASE_DIR = '/app/logs/contexts';
-
-function getSessionStore(sessionKey) {
-    if (!toolMemoryStore.has(sessionKey)) {
-        toolMemoryStore.set(sessionKey, new Map());
-        // セッションごとのディレクトリ作成
-        const sessionDir = path.join(CONTEXT_BASE_DIR, sessionKey);
-        if (!fs.existsSync(sessionDir)) {
-            fs.mkdirSync(sessionDir, { recursive: true });
-        }
-    }
-    return toolMemoryStore.get(sessionKey);
-}
+const CONTEXT_BASE_DIR = process.env.CONTEXT_BASE_DIR || path.join(__dirname, '../logs/contexts');
 
 /**
- * ツール情報をメモリとファイルの両方に保存する
+ * ツール情報をファイルに保存する
  */
 function storeToolContext(sessionKey, callId, data) {
-    const sessionStore = getSessionStore(sessionKey);
-    const existing = sessionStore.get(callId) || {};
+    const sessionDir = path.join(CONTEXT_BASE_DIR, sessionKey);
+    if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+    }
+    
+    let existing = {};
+    const filePath = path.join(sessionDir, `${callId}.json`);
+    
+    try {
+        if (fs.existsSync(filePath)) {
+            existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        }
+    } catch (e) {
+        // ignore parse error for existing file
+    }
+
     const updated = { ...existing, ...data };
     
-    // メモリに保存
-    sessionStore.set(callId, updated);
-    
-    // ファイルに保存
     try {
-        const filePath = path.join(CONTEXT_BASE_DIR, sessionKey, `${callId}.json`);
         fs.writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8');
         log(`[tool-store] Persisted context: ${sessionKey}/${callId}.json`);
     } catch (e) {
@@ -51,20 +46,13 @@ function storeToolContext(sessionKey, callId, data) {
 }
 
 /**
- * ツール情報をメモリから取得し、なければファイルからロードする
+ * ツール情報をファイルからロードする
  */
 function loadToolContext(sessionKey, callId) {
-    const sessionStore = getSessionStore(sessionKey);
-    if (sessionStore.has(callId)) {
-        return sessionStore.get(callId);
-    }
-    
-    // ファイルからロードを試みる
     try {
         const filePath = path.join(CONTEXT_BASE_DIR, sessionKey, `${callId}.json`);
         if (fs.existsSync(filePath)) {
             const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-            sessionStore.set(callId, data);
             log(`[tool-store] Loaded context from file: ${sessionKey}/${callId}.json`);
             return data;
         }
@@ -120,7 +108,6 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
             // SSoT 6.0: ツールマーカー検出正規表現
             const TOOL_MARKER_RE = /\n?⚙️ tooluse\[([^\]]+)\]\[([^\]]+)\]\n?/g;
-            const sessionStore = getSessionStore(sessionKey);
 
             for (const msg of messages) {
                 let text = '';
@@ -284,7 +271,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 
                 case 'tool_call_request': {
                     // SSoT 6.0/6.1: ツールマーカー ID 方式 (統合済み)
-                    // 1. 実データをアダプター側（メモリ & ファイル）に保存
+                    // 1. 実データをアダプター側（ファイル）に保存
                     // 2. OpenClaw に ⚙️ tooluse[name][callId] マーカーのみを content として送出
                     // ※ tool_calls フィールドは一切送出しない（インターセプト完全回避）
                     if (!event.value) break;
@@ -292,10 +279,6 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                     const callId = tc.callId || tc.id || randomId();
                     const name = tc.name || 'unknown';
                     const args = tc.args || {};
-                    
-                    // (a) メモリ保存
-                    const sessionStore = getSessionStore(sessionKey);
-                    sessionStore.set(callId, { name, args, result: null });
                     
                     // (b) ファイル永続化 (SSoT 6.1)
                     storeToolContext(sessionKey, callId, { name, args, result: null });
