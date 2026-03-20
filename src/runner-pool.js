@@ -114,24 +114,21 @@ function prepareIsolatedGeminiHome(workspaceCwd) {
         }
     } catch (_) { }
 
-    userSettings.mcpServers = userSettings.mcpServers || {};
-    // デバッグ用: stderr を logs/mcp.log にリダイレクトするシェルラッパーを一時的に復活
     const mcpLogPath = path.join(baseDir, 'logs', 'mcp.log');
     userSettings.mcpServers['openclaw-tools'] = {
-        command: 'bash',
-        args: ['-c', `node "${path.join(baseDir, 'mcp-server.mjs')}" "" "${workspaceCwd}" 2>> "${mcpLogPath}"`],
+        command: 'node',
+        args: [path.join(baseDir, 'mcp-server-lightweight.mjs'), "", workspaceCwd],
+        env: {
+            OPENCLAW_GATEWAY_URL: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789'
+        },
         trust: true
     };
 
     // 2. スキル有効化の注入 (SSoT 4.0)
-    // ソースコード調査の結果、settings.json に skills.path は存在せず、
-    // GEMINI_CLI_HOME/skills(/root/.gemini/skills) が自動検出されるためフラグのみ設定。
     userSettings.skills = userSettings.skills || {};
     userSettings.skills.enabled = true;
 
-    // 信頼フォルダの登録: config.js L426-428 では trustedFolder=false の場合に
-    // --approval-mode=yolo が強制的に DEFAULT に落とされ run_shell_command が無効化される。
-    // ワークスペースと隔離ホームを両方信頼リストに追加して YOLO モードを維持する。
+    // 信頼フォルダの登録
     userSettings.security = userSettings.security || {};
     userSettings.security.folderTrust = userSettings.security.folderTrust || {};
     const existingTrusted = userSettings.security.folderTrust.trustedFolders || [];

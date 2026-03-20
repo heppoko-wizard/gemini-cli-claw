@@ -11,7 +11,6 @@ services:
     environment:
       - NODE_ENV=production
       - GEMINI_ADAPTER_PORT=3972
-      - GEMINI_CLI_HOME=/root
       - DEBUG=false
       # Path mapping inside the container for the separated workspace
       - AI_WORKSPACE_DIR=/workspace

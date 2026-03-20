@@ -84,7 +84,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
         id: responseId,
         object: 'chat.completion.chunk',
         created: Math.floor(Date.now() / 1000),
-        model: 'gemini',
+        model: model,
         choices: [{
             index: 0,
             delta: { role: 'assistant', content: '' },
@@ -237,7 +237,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                     id: responseId,
                     object: 'chat.completion.chunk',
                     created: Math.floor(Date.now() / 1000),
-                    model: 'gemini',
+                    model: model,
                     choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
                 });
                 res.write('data: [DONE]\n\n');
@@ -263,7 +263,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { content: event.value },
@@ -282,7 +282,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { reasoning_content: thoughtText },
@@ -313,7 +313,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { content: marker },
@@ -343,7 +343,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { content: `\n⚠️ [Gemini Error] ${errMsg}` },
@@ -358,7 +358,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { content: '\n⚠️ Loop detected, stopping execution.' },
@@ -374,7 +374,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                         id: responseId,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
-                        model: 'gemini',
+                        model: model,
                         choices: [{
                             index: 0,
                             delta: { content: `\n🛑 Agent stopped: ${reason}` },
@@ -424,7 +424,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 id: responseId,
                 object: 'chat.completion.chunk',
                 created: Math.floor(Date.now() / 1000),
-                model: 'gemini',
+                model: model,
                 choices: [{
                     index: 0,
                     delta: {},
