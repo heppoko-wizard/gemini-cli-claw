@@ -291,9 +291,11 @@ class RunnerPool {
         });
 
         runner.once('exit', (code, signal) => {
-            // プロセスが終了（使い捨て完了）したら次のプロセスを補充する
-            console.log(`[Pool] Runner consumed (exited with code ${code}, signal ${signal}). Spawning next...`);
-            this.readyRunner = null;
+            // プロセスが異常終了した場合、新しいプロセスを補充する
+            console.log(`[Pool] Runner exited (code ${code}, signal ${signal}). Spawning replacement...`);
+            if (this.readyRunner === runner) {
+                this.readyRunner = null;
+            }
             this.isSpawning = false; // エラー落ちなどでフラグが残るのを防ぐ
             this.spawnNewRunner();
         });
@@ -341,6 +343,28 @@ class RunnerPool {
 
         // 呼び出し元（Streaming層）へ、入出力ストリームを持つRunnerプロセスを返す
         resolve(runner);
+    }
+
+    /**
+     * 使い終わったRunnerプロセスをプール（待機状態）に返却します。
+     * 待機中のキューがあれば即座に割り当てます。
+     * @param {ChildProcess} runner 返却されるRunnerプロセス
+     */
+    releaseRunner(runner) {
+        // プロセスが死んでいる場合は返却を受け付けない
+        if (runner.killed || !runner.connected) {
+            console.log("[Pool] Cannot release a dead runner. It will be replaced automatically.");
+            return;
+        }
+
+        if (this.pendingRequests.length > 0) {
+            console.log("[Pool] Releasing runner: immediately assigning to next pending request...");
+            const req = this.pendingRequests.shift();
+            this.assignRunner(runner, req);
+        } else {
+            console.log("[Pool] Releasing runner: returning to ready standby.");
+            this.readyRunner = runner;
+        }
     }
 
     /**

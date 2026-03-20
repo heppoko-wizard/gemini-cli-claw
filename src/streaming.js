@@ -224,7 +224,30 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         // --- SSoT 5.0: IPC によるイベント受信 ---
         
-        runner.on('message', (msg) => {
+        let isFinished = false;
+
+        const messageHandler = (msg) => {
+            if (msg.type === 'run_complete') {
+                if (isFinished) return;
+                isFinished = true;
+                const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
+                log(`[perf] Runner finished execution. Total duration: ${totalDur}s`);
+                
+                sseWrite(res, {
+                    id: responseId,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: 'gemini',
+                    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+                });
+                res.write('data: [DONE]\n\n');
+                res.end();
+                
+                runner.removeListener('message', messageHandler);
+                runnerPool.releaseRunner(runner);
+                return;
+            }
+
             if (msg.type !== 'gemini_event') return;
             const event = msg.event;
             
@@ -365,7 +388,9 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                     log(`[ipc] Unhandled gemini_event type: ${event.type}`);
                     break;
             }
-        });
+        };
+
+        runner.on('message', messageHandler);
 
         // --- SSoT 5.0: stdout は IPC に移行したためログ出力のみ ---
         runner.stdout.on('data', chunk => {
@@ -381,10 +406,17 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
             }
         });
 
-        // 3. プロセスが終了したら完了レスポンスを送る
+        // 3. プロセスが例外終了したらフェイルセーフとして完了レスポンスを送る
         runner.on('close', (code, signal) => {
+            runner.removeListener('message', messageHandler);
+            if (isFinished) {
+                log(`[pool] Runner process closed (code: ${code}, signal: ${signal}).`);
+                return;
+            }
+            isFinished = true;
+
             const totalDur = ((Date.now() - perfStart) / 1000).toFixed(2);
-            log(`[perf] Runner process closed with code ${code}, signal ${signal}. Total duration: ${totalDur}s`);
+            log(`[perf] Runner process closed unexpectedly with code ${code}, signal ${signal}. Total duration: ${totalDur}s`);
             if (stderr.trim()) log(`Runner stderr: ${stderr.trim().substring(0, 300)}`);
 
             // Send completion chunk

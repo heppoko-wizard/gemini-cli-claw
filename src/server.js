@@ -118,7 +118,7 @@ function readBody(req) {
         req.on('end', () => {
             try {
                 const rawBuffer = Buffer.concat(chunks);
-                if (process.env.ADAPTER_DEBUG === 'true') {
+                if (process.env.ADAPTER_DEBUG === 'true' || process.env.DEBUG === 'true') {
                     fs.writeFileSync(require('path').join(__dirname, '../logs/raw_req.bin'), rawBuffer);
                 }
                 const data = rawBuffer.toString('utf8');
@@ -131,10 +131,11 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-    const reqStart = Date.now();
     const url = new URL(req.url, `http://localhost:${PORT}`);
+    const isDebug = process.env.DEBUG === 'true' || process.env.ADAPTER_DEBUG === 'true';
+
     log(`Incoming request: ${req.method} ${url.pathname}`);
-    if (req.method === 'POST') log(`Headers: ${JSON.stringify(req.headers)}`);
+    if (req.method === 'POST' && isDebug) log(`Headers: ${JSON.stringify(req.headers)}`);
 
     // Health check
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -176,7 +177,7 @@ const server = http.createServer(async (req, res) => {
         let body;
         try {
             body = await readBody(req);
-            if (process.env.ADAPTER_DEBUG === 'true') {
+            if (process.env.ADAPTER_DEBUG === 'true' || process.env.DEBUG === 'true') {
                 const logPath = require('path').join(__dirname, '../logs/adapter_last_req.json');
                 const logDir = require('path').dirname(logPath);
                 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });

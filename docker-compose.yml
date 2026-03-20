@@ -17,6 +17,12 @@ services:
       - AI_WORKSPACE_DIR=/workspace
       - GOG_KEYRING_PASSWORD=openclaw-adapter
       - GOG_KEYRING_BACKEND=file
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     volumes:
       # Mount the unified configuration directory from the host to the container's expected paths
       - ./.docker-config/openclaw:/root/.openclaw

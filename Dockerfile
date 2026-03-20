@@ -1,61 +1,59 @@
-# OpenClaw Gemini CLI Adapter - Heavy Duty Dockerfile (Single Stage)
-#
+# ==========================================
+# Phase 1: Builder (Native Compilations)
+# ==========================================
+FROM node:24-bookworm AS builder
+
+# ネイティブビルドツールの導入
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake make python3 gcc g++ curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# gogcli バイナリの取得
+RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz" | tar xz -C /usr/local/bin gog
+
+# アダプタパッケージ情報と依存関係のインストール（ネイティブビルドを含むが、不要なオプションは除外）
+COPY package*.json ./
+RUN npm ci --production --omit=optional
 
 # ==========================================
-# The Unbreakable Environment
+# Phase 2: Runtime (Slim Execution Env)
 # ==========================================
-FROM node:24-bookworm
+FROM node:24-bookworm-slim
 
-# PID 1 ハング対策의 tini と、証明書/暗号・ネイティブビルド用ツール一式を確実に導入
-# C++17対応のgcc, cmake, git, python3 は sqlite-vec や node-pty のコンパイルで必須
-# Playwright等の依存ライブラリもフルイメージのためほぼ充足しているが、念のため基本的な共有ライブラリ(nss3等)も明記
-# ※ WSL等の不安定なDockerネットワーク環境に対処するため、apt-getにリトライとフォールバック処理を付与して強行突破する
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout="20" -o Acquire::https::Timeout="20" || \
-    (sleep 3 && apt-get update -o Acquire::Retries=5) && \
-    apt-get install -y --no-install-recommends \
-    tini \
-    curl bash git openssh-client ca-certificates unzip \
-    build-essential cmake make python3 gcc g++ \
+WORKDIR /app
+
+# 実行に必要な最小限のライブラリと tini
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini curl bash git openssh-client ca-certificates unzip \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
     libgbm1 libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# SSH鍵エラーを回避し、全てのGitフェッチをセキュアなHTTPSへ強制変換 (無人インストール時の必須設定)
-RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
-
-# Google Workspace操作用のgogcliバイナリを取得し、PATHが通る場所に配置 (バージョン固定)
-RUN curl -fsSL "https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz" | tar xz -C /usr/local/bin gog
-
-# Tailscale バイナリの導入 (OpenClaw native Serve 統合に必須)
-RUN curl -fsSL https://tailscale.com/install.sh | sh
-
-# 軽量プロセスマネージャー(Bun)環境構築
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
-
-# npm globalのパス固定と権限エラー回避（root環境下でのNVM誤作動防止）
+# OpenClaw のインストール（コード変更の影響を受けないよう、ソースコピー前に実行してキャッシュを活用）
 ENV NPM_CONFIG_PREFIX=/root/.npm-global
 ENV PATH="/root/.npm-global/bin:${PATH}"
+RUN npm install -g openclaw@2026.3.13 && npm cache clean --force
 
-# 【最重関門】ネイティブビルドを伴う最新版 OpenClaw (v2026.3.13) のグローバルインストール
-RUN npm install -g openclaw@2026.3.13
+# Builder ステージから成果物をコピー
+COPY --from=builder /usr/local/bin/gog /usr/local/bin/gog
+COPY --from=builder /app/node_modules /app/node_modules
 
-# /app/node_modules/.bin を PATH に追加し、gemini コマンドをどこでも叩けるようにする
-ENV PATH="/app/node_modules/.bin:${PATH}"
-
-WORKDIR /app
-
-# アダプタパッケージ情報とソースの転送
-COPY package*.json ./
-RUN npm ci
-
+# アダプタソースの転送（.dockerignore により最小限に抑制）
 COPY . .
+
+# SSH鍵エラー回避設定
+RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
 # 実行権限の付与
 RUN chmod +x start.sh launch.sh
 
-# Docker隔離環境用プロパティ群
+# 環境変数の設定
+ENV NODE_ENV=production
+ENV NPM_CONFIG_PREFIX=/root/.npm-global
+ENV PATH="/root/.npm-global/bin:/app/node_modules/.bin:${PATH}"
 ENV PLUGIN_DIR=/app
 ENV GEMINI_CLI_HOME=/root/.gemini
 ENV OPENCLAW_CONFIG=/root/.openclaw/openclaw.json
@@ -63,6 +61,5 @@ ENV OPENCLAW_CONFIG=/root/.openclaw/openclaw.json
 EXPOSE 3972
 EXPOSE 18789
 
-# tini をPID 1として使用し、シグナルハンドリングのハング(OSへのKILL不可)を確実に防ぐ
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bash", "start.sh"]

@@ -4,7 +4,6 @@
 #
 # 使い方: ./start.sh [--port 3972]
 # OpenClaw起動前にこのスクリプトを実行してアダプタサーバーを立ち上げておく。
-# Bunが利用可能な場合は自動的にBunランタイムを使用する（高速起動）。
 #
 
 set -euo pipefail
@@ -24,12 +23,9 @@ PID_FILE="${SCRIPT_DIR}/logs/adapter.pid"
 # Gemini CLI のホームディレクトリを尊重 (Dockerfileで設定済み)
 # export GEMINI_CLI_HOME="${SCRIPT_DIR}/gemini-home"
 
-# ランタイム選択: server.js は必ず Node.js を使用
-# Bun の HTTP サーバーは req.on('close') が TCP 切断ではなく body 消費完了で発火するため、
-# クライアント切断検知（Abort 機能）が正しく動作しない。
-# Runner プロセスは runner-pool.js 内の spawn で Bun を使用する。
+# ランタイム選択: 全てのプロセスで Node.js を使用 (Persistent Runner 対応済み)
 RUNTIME="node"
-echo "[start.sh] Using Node.js runtime ($(node --version)) for server.js"
+echo "[start.sh] Using Node.js runtime ($(node --version))"
 
 # 既に起動中か確認 (PID)
 if [[ -f "$PID_FILE" ]]; then

@@ -52,6 +52,8 @@ async function main() {
         console.log("[Runner] Ready. Waiting for IPC message...");
     }
 
+    let interceptorInstalled = false;
+
     process.on('message', async (message) => {
         if (message.type === 'run') {
             const runnerPerfStart = Date.now();
@@ -70,7 +72,8 @@ async function main() {
             if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] Context binding (DTO) took ${Date.now() - runnerPerfStart}ms`);
 
             // --- SSoT 5.0: 全イベント傍受＋IPC送信 ---
-            if (config && config.getGeminiClient) {
+            if (config && config.getGeminiClient && !interceptorInstalled) {
+                interceptorInstalled = true;
                 const geminiClient = config.getGeminiClient();
                 const originalSendMessageStream = geminiClient.sendMessageStream.bind(geminiClient);
 
@@ -194,7 +197,7 @@ async function main() {
                 });
 
                 if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] runNonInteractive finished. (Took ${Date.now() - runStart}ms, Total: ${Date.now() - runnerPerfStart}ms)`);
-                process.exit(ExitCodes.SUCCESS);
+                process.send({ type: 'run_complete' });
             } catch (error) {
                 console.error("[Runner] Error during execution:", error);
                 process.exit(ExitCodes.FATAL_INPUT_ERROR);
