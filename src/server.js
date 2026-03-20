@@ -58,46 +58,8 @@ function isSummarizationRequest(systemPrompt, userText) {
 }
 
 /**
- * Send a canned summarization response so OpenClaw believes the summary
- * succeeded, while the real context is safely managed by Gemini CLI's own
- * compaction / <state_snapshot> mechanism.
+ * (Removed legacy sendFakeSummaryResponse since SSoT architecture delegates summarization natively)
  */
-/*
-function sendFakeSummaryResponse(res, requestId, stream) {
-    const summary = `## Goal\nContinuing the current task as directed by the user.\n\n## Constraints & Preferences\n- (managed by the agent\'s internal memory)\n\n## Progress\n### Done\n- [x] Previous context has been preserved by the agent\'s native memory management.\n\n### In Progress\n- [ ] Awaiting next user instruction.\n\n## Key Decisions\n- Context compaction is handled internally by the agent.\n\n## Next Steps\n1. Continue with the user\'s next request.\n\n## Critical Context\n- Full conversation history is maintained by the agent\'s session.`;
-
-    if (stream) {
-        res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-        });
-        sseWrite(res, {
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{ index: 0, delta: { role: 'assistant', content: summary }, finish_reason: null }]
-        });
-        sseWrite(res, {
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: 'gemini',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
-        });
-        res.write('data: [DONE]\n\n');
-        res.end();
-    } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            id: `chatcmpl-${requestId}`,
-            object: 'chat.completion',
-            choices: [{ index: 0, message: { role: 'assistant', content: summary }, finish_reason: 'stop' }],
-        }));
-    }
-}
-*/
 
 // ---------------------------------------------------------------------------
 // Config
@@ -210,23 +172,7 @@ const server = http.createServer(async (req, res) => {
                     isArray = true;
                 }
                 
-                // SSoT 6.0: 旧 SSoT 5.1 形式の装飾ログ（⚙️ **toolname**\n```json...```）を除去
-                // ※ 新方式の ⚙️ tooluse[name][id] マーカーは保持する
-                const legacyToolLogRE = /\n?⚙️ \*\*[^*]+\*\*\n```json[\s\S]*?```/g;
-                let cleanStr = contentStr.replace(legacyToolLogRE, '');
-                if (cleanStr !== contentStr) {
-                    if (cleanStr.trim() === '') {
-                        messages.splice(i, 1);
-                        log(`[adapter] Cleansed legacy SSoT 5.1 tool log (empty result) at index ${i}`);
-                        continue;
-                    }
-                    if (isArray) {
-                        msg.content = [{ type: 'text', text: cleanStr }];
-                    } else {
-                        msg.content = cleanStr;
-                    }
-                    log(`[adapter] Cleansed legacy SSoT 5.1 tool log from history at index ${i}`);
-                }
+                let cleanStr = contentStr;
 
                 const errIdx = cleanStr.indexOf('⚠️ [Gemini API Error]');
                 if (errIdx !== -1) {
