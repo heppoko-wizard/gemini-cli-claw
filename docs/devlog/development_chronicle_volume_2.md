@@ -46,3 +46,24 @@
 - `Dockerfile`, `docker-compose.yml`, `.dockerignore` — ビルド基盤の刷新。
 - `src/server.js`, `start.sh` — デバッグ抑制とランタイムの Node 一本化。
 - `docs/investigation/046_docker_optimization_report.md` — 最適化の詳細レポート。
+
+---
+
+## [2026-03-20] Session 55: 技術的負債のパージとコードの純化
+
+### やったこと
+- **デッドコードの物理的削除**:
+    - **`server.js`**: 旧アーキテクチャで使われていた `sendFakeSummaryResponse`（ダミー要約応答）の巨大なコメントアウトを削除。
+    - **`server.js`**: SSoT 5.1 時代の履歴クレンジング正規表現（`legacyToolLogRE`）を削除。現在は SSoT 6.x マーカー方式に完全移行しているため、不要な CPU 負荷を排除。
+    - **`runner-pool.js`**: 使い捨てランナー時代の「寿命監視タイマー」の残骸を整理。
+- **コードベースの軽量化**:
+    - 機能を損なうことなく、不要な分岐や過去のハックを排除し、現在の Persistent Runner 構成に最適化。
+
+### 成果
+- コードの可読性が大幅に向上。
+- 毎ターンのメッセージ処理における無駄な正規表現エンジンの起動を抑制し、微細なパフォーマンス向上を実現。
+
+### 変更したファイル
+- `src/server.js`, `src/runner-pool.js` — 不要コードの削除。
+- `docs/investigation/047_tech_debt_and_deadcode_audit.md` — 負債の特定と処置の記録。
+

@@ -158,11 +158,15 @@ async function main() {
                 }
 
                 if (model) {
+                    // Update the core model state (Critical for persistent runners)
+                    config.setModel(model);
+
+                    // Also sync the settings DTO used by runNonInteractive
                     settings.merged.model.name = model;
                     if (config.settings && config.settings.model) {
                         config.settings.model.name = model;
                     }
-                    console.log(`[Runner] Using model: ${model}`);
+                    console.log(`[Runner] Switched model to: ${model} (Active: ${config.getActiveModel()})`);
                 }
 
                 let finalInput = input;

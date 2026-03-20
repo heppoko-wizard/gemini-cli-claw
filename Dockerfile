@@ -32,6 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
+# Tailscale のインストール (SSoT 5.5: コンテナ内からの Tailscale Serve 利用)
+RUN curl -fsSL https://tailscale.com/install.sh | sh
+
+
 # OpenClaw のインストール（コード変更の影響を受けないよう、ソースコピー前に実行してキャッシュを活用）
 ENV NPM_CONFIG_PREFIX=/root/.npm-global
 ENV PATH="/root/.npm-global/bin:${PATH}"
