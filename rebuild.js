@@ -88,13 +88,18 @@ async function main() {
             console.log('\n\n✅ Server is UP and STABLE!');
             console.log(`🔗 Dashboard: ${CHECK_URL}`);
             console.log('To view logs: docker logs -f openclaw-gemini-adapter');
-        } else if (errorReason) {
-            console.error(`\n\n❌ Boot failed early: ${errorReason}`);
-            console.error('Please fix the configuration and try again.');
         } else {
-            console.error('\n\n❌ Timeout: Server did not respond. Please check: docker logs -f openclaw-gemini-adapter');
+             console.error(`\n\n❌ Boot failed ${errorReason ? ': ' + errorReason : '(Timeout)'}`);
+             console.log('--- Last 20 lines of container log ---');
+             const finalLog = spawn('docker', ['logs', '--tail', '20', 'openclaw-gemini-adapter'], { stdio: 'inherit', shell: true });
+             finalLog.on('close', () => {
+                 console.log('---------------------------------------');
+                 console.error('Please fix the configuration and try again.');
+                 process.exit(1);
+             });
+             return;
         }
-        process.exit(ready ? 0 : 1);
+        process.exit(0);
     });
 }
 

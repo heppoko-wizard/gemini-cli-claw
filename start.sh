@@ -30,7 +30,8 @@ echo "[start.sh] Using Node.js runtime ($(node --version))"
 # 既に起動中か確認 (PID)
 if [[ -f "$PID_FILE" ]]; then
     OLD_PID=$(cat "$PID_FILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
+    # host PIDモードでは他人のプロセスに当たる可能性があるため判定を慎重に
+    if kill -0 "$OLD_PID" 2>/dev/null && ps -p "$OLD_PID" -o comm= | grep -q "node"; then
         echo "[start.sh] Adapter already running (PID $OLD_PID) on port $PORT"
         exit 0
     else

@@ -6,8 +6,11 @@ services:
       network: host
     container_name: openclaw-gemini-adapter
     restart: unless-stopped
+    privileged: true
     # Use host network to seamlessly bind to Tailscale interface and expose ports directly
     network_mode: "host"
+    ipc: "host"
+    pid: "host"
     environment:
       - NODE_ENV=production
       - GEMINI_ADAPTER_PORT=3972
@@ -16,6 +19,8 @@ services:
       - AI_WORKSPACE_DIR=/workspace
       - GOG_KEYRING_PASSWORD=openclaw-adapter
       - GOG_KEYRING_BACKEND=file
+      # Audio sharing (PulseAudio/PipeWire)
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
     deploy:
       resources:
         limits:
@@ -33,4 +38,10 @@ services:
       - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
       # Mount logs directory for debugging (SSoT 6.0)
       - ./logs:/app/logs
+      # Hardware Access (Full)
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - /sys:/sys:ro
+      - /lib/modules:/lib/modules:ro
+      - /run/user/1000/pulse:/run/user/1000/pulse
     # Additional capabilities might be required depending on network features, but usually host network is enough.
