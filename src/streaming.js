@@ -109,7 +109,15 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
             // SSoT 6.0: ツールマーカー検出正規表現
             const TOOL_MARKER_RE = /\n?⚙️ tooluse\[([^\]]+)\]\[([^\]]+)\]\n?/g;
 
-            for (const msg of messages) {
+            // SSoT: Fix double-inbound (message duplication)
+            // The last message in the OpenClaw array is the *current* user prompt.
+            // Since we call sendMessageStream(prompt) separately, we MUST remove it 
+            // from the resume history to prevent it from appearing twice in Gemini's context.
+            const historyOnly = (messages[messages.length - 1]?.role === 'user')
+                ? messages.slice(0, -1)
+                : messages;
+
+            for (const msg of historyOnly) {
                 let text = '';
                 if (typeof msg.content === 'string') {
                     text = msg.content;
@@ -244,6 +252,8 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 res.end();
                 
                 runner.removeListener('message', messageHandler);
+                runner.stdout.removeListener('data', stdoutHandler);
+                runner.stderr.removeListener('data', stderrHandler);
                 runnerPool.releaseRunner(runner);
                 return;
             }
@@ -392,23 +402,27 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         runner.on('message', messageHandler);
 
-        // --- SSoT 5.0: stdout は IPC に移行したためログ出力のみ ---
-        runner.stdout.on('data', chunk => {
+        const stdoutHandler = chunk => {
             const raw = chunk.toString('utf-8');
             log(`[stdout-passthrough] ${raw.substring(0, 200)}`);
-        });
+        };
 
-        runner.stderr.on('data', chunk => {
+        const stderrHandler = chunk => {
             const raw = chunk.toString('utf-8');
             stderr += raw;
             if (process.env.DEBUG === '1' || process.env.DEBUG === 'true') {
                 process.stderr.write(`[Runner:stderr] ${raw}`);
             }
-        });
+        };
+
+        runner.stdout.on('data', stdoutHandler);
+        runner.stderr.on('data', stderrHandler);
 
         // 3. プロセスが例外終了したらフェイルセーフとして完了レスポンスを送る
         runner.on('close', (code, signal) => {
             runner.removeListener('message', messageHandler);
+            runner.stdout.removeListener('data', stdoutHandler);
+            runner.stderr.removeListener('data', stderrHandler);
             if (isFinished) {
                 log(`[pool] Runner process closed (code: ${code}, signal: ${signal}).`);
                 return;

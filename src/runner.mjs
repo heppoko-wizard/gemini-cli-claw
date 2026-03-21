@@ -153,8 +153,10 @@ async function main() {
             try {
                 if (resumedSessionData && resumedSessionData.conversation) {
                     const sidStart = Date.now();
-                    config.setSessionId(resumedSessionData.conversation.sessionId);
-                    if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] setSessionId took ${Date.now() - sidStart}ms`);
+                    // 既存セッションの履歴増幅を避けるため、一過性のUnique IDを発行
+                    const ephemeralSessionId = `${resumedSessionData.conversation.sessionId}_${prompt_id || Date.now()}`;
+                    config.setSessionId(ephemeralSessionId);
+                    if (process.env.ADAPTER_DEBUG === 'true') console.error(`[Runner:perf] setSessionId(${ephemeralSessionId}) took ${Date.now() - sidStart}ms`);
                 }
 
                 if (model) {
