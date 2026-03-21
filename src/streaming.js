@@ -132,43 +132,70 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                     });
                 } else if (msg.role === 'assistant') {
                     // SSoT 6.0: テキスト内の ⚙️ tooluse マーカーを検出してリハイドレート
-                    const toolCallsFromMarkers = [];
+                    const toolCalls = [];
+                    const functionParts = [];
                     let cleanText = text;
                     let match;
                     TOOL_MARKER_RE.lastIndex = 0;
+
                     while ((match = TOOL_MARKER_RE.exec(text)) !== null) {
                         const [fullMatch, markerName, markerCallId] = match;
                         const stored = loadToolContext(sessionKey, markerCallId);
-                        if (stored) {
-                            log(`[history] Rehydrating tool: ${markerName} [${markerCallId}]`);
-                            toolCallsFromMarkers.push({
-                                id: markerCallId,
-                                name: stored.name,
-                                args: stored.args,
-                                status: 'success',
-                                timestamp: new Date().toISOString(),
-                                result: stored.result ? [{
-                                    functionResponse: {
-                                        name: stored.name,
-                                        response: { output:
-                                            typeof stored.result === 'string'
-                                                ? stored.result
-                                                : JSON.stringify(stored.result)
-                                        }
-                                    }
-                                }] : undefined,
-                            });
-                        } else {
-                            log(`[history] WARN: No stored data for tool marker: ${markerName} [${markerCallId}]`);
-                        }
+                        
+                        // 400エラー対策: 常に tool_call と function_response のペアを作る
+                        const callId = markerCallId;
+                        const toolName = stored ? stored.name : markerName;
+                        const toolArgs = stored ? stored.args : {};
+                        const toolResult = stored ? (stored.result || "(No result captured)") : "(No history found for this tool)";
+
+                        log(`[history] Rehydrating tool turn: ${toolName} [${callId}]`);
+                        
+                        toolCalls.push({
+                            id: callId,
+                            name: toolName,
+                            args: toolArgs
+                        });
+
+                        functionParts.push({
+                            functionResponse: {
+                                name: toolName,
+                                response: { 
+                                    output: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult)
+                                }
+                            }
+                        });
+
                         cleanText = cleanText.replace(fullMatch, '');
                     }
 
-                    geminiMessages.push({
-                        type: 'gemini',
-                        content: [{ text: cleanText.trim() }],
-                        ...(toolCallsFromMarkers.length > 0 ? { toolCalls: toolCallsFromMarkers } : {})
-                    });
+                    if (toolCalls.length > 0) {
+                        // 1. Tool Call Turn (Model)
+                        geminiMessages.push({
+                            type: 'gemini',
+                            content: [{ text: "" }], // ツール呼び出し時のテキストは空または最小限にする
+                            toolCalls: toolCalls
+                        });
+
+                        // 2. Tool Response Turn (Function)
+                        geminiMessages.push({
+                            type: 'function',
+                            parts: functionParts
+                        });
+
+                        // 3. Final Assistant Text Turn (If any)
+                        if (cleanText.trim()) {
+                            geminiMessages.push({
+                                type: 'gemini',
+                                content: [{ text: cleanText.trim() }]
+                            });
+                        }
+                    } else {
+                        // 通常のアシスタントメッセージ
+                        geminiMessages.push({
+                            type: 'gemini',
+                            content: [{ text: text.trim() }]
+                        });
+                    }
                 } else if (msg.role === 'tool') {
                     const resultToolCallId = msg.tool_call_id || '';
                     const result = typeof msg.content === 'string' ? msg.content : '';
@@ -197,6 +224,7 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
                 },
                 filePath: 'memory-injected'
             };
+            log(`[history] Final resumedSessionData structure (first 2000 chars): ${JSON.stringify(resumedSessionData).substring(0, 2000)}`);
         }
         debug(`[perf] History rehydration (SSoT) took ${Date.now() - rehydrateStart}ms for ${messages.length} messages.`);
 
@@ -402,8 +430,34 @@ async function runGeminiStreaming({ prompt, messages, model, sessionName, mediaP
 
         runner.on('message', messageHandler);
 
+        let stdoutBuffer = '';
         const stdoutHandler = chunk => {
             const raw = chunk.toString('utf-8');
+            stdoutBuffer += raw;
+            
+            let lineEnd;
+            while ((lineEnd = stdoutBuffer.indexOf('\n')) !== -1) {
+                const line = stdoutBuffer.substring(0, lineEnd).trim();
+                stdoutBuffer = stdoutBuffer.substring(lineEnd + 1);
+                
+                if (line.startsWith('{') && line.endsWith('}')) {
+                    try {
+                        const event = JSON.parse(line);
+                        // SSoT 6.5: stdout からのツール結果捕捉。
+                        // Gemini CLI Core はフラットなスキーマ (tool_id, output) を吐き出す。
+                        if (event.type === 'tool_result') {
+                            const callId = event.tool_id || (event.value && event.value.callId);
+                            const result = event.output || (event.value && event.value.result);
+                            if (callId) {
+                                log(`[adapter] [tool-store] Captured tool_result from stdout: ${callId}`);
+                                storeToolContext(sessionKey, callId, { result });
+                            }
+                        }
+                    } catch (_) {
+                        // JSON パースエラーは無視して通常のパススルーへ
+                    }
+                }
+            }
             log(`[stdout-passthrough] ${raw.substring(0, 200)}`);
         };
 
