@@ -60,3 +60,4 @@ logs/*.json
 
 # Docker
 .docker-config/
+credentials.json
